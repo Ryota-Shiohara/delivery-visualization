@@ -34,6 +34,10 @@ data/raw/
 data/processed/
 data/exports/
 *.log
+.certs/
+*.tsbuildinfo
+playwright-report/
+test-results/
 
 # OS・エディタ
 .DS_Store
