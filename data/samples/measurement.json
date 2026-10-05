@@ -1,0 +1,21 @@
+{
+  "schemaVersion": "0.1.0",
+  "measurementId": "sample-measurement-0001",
+  "deviceId": "sample-device-001",
+  "deliveryId": "sample-delivery-001",
+  "measuredAt": "2026-10-05T00:00:00.000Z",
+  "acceleration": {
+    "x": 0.12,
+    "y": -0.08,
+    "z": 9.81,
+    "includesGravity": true
+  },
+  "tiltDegrees": 2.5,
+  "position": {
+    "measuredAt": "2026-10-05T00:00:00.000Z",
+    "latitude": 35.0,
+    "longitude": 139.0,
+    "accuracyMeters": 5.0,
+    "speedMetersPerSecond": 3.0
+  }
+}

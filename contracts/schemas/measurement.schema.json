@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "計測データ（暫定）",
+  "description": "実装前にチームで合意するためのたたき台。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "measurementId", "deviceId", "deliveryId", "measuredAt", "acceleration", "tiltDegrees", "position"],
+  "properties": {
+    "schemaVersion": { "const": "0.1.0" },
+    "measurementId": { "type": "string", "minLength": 1 },
+    "deviceId": { "type": "string", "minLength": 1 },
+    "deliveryId": { "type": "string", "minLength": 1 },
+    "measuredAt": { "$ref": "#/$defs/utcTimestamp" },
+    "acceleration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z", "includesGravity"],
+      "properties": {
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "z": { "type": "number" },
+        "includesGravity": { "type": "boolean" }
+      }
+    },
+    "tiltDegrees": { "type": ["number", "null"], "minimum": 0, "maximum": 180 },
+    "position": {
+      "oneOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["measuredAt", "latitude", "longitude", "accuracyMeters", "speedMetersPerSecond"],
+          "properties": {
+            "measuredAt": { "$ref": "#/$defs/utcTimestamp" },
+            "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+            "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+            "accuracyMeters": { "type": "number", "minimum": 0 },
+            "speedMetersPerSecond": { "type": ["number", "null"], "minimum": 0 }
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "utcTimestamp": { "type": "string", "format": "date-time", "pattern": "Z$" }
+  }
+}

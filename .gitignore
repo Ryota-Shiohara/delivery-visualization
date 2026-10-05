@@ -1,0 +1,42 @@
+# 環境変数・認証情報
+.env
+.env.*
+!.env.example
+.aws/
+*.pem
+*.key
+
+# JavaScript / TypeScript
+node_modules/
+dist/
+build/
+coverage/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# AWS構成ツールの生成物・ローカル状態
+cdk.out/
+.aws-sam/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# 実測データ・実行時出力（位置情報を含む）
+data/raw/
+data/processed/
+data/exports/
+*.log
+
+# OS・エディタ
+.DS_Store
+Thumbs.db
+.idea/
+*.swp
