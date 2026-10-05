@@ -1,5 +1,15 @@
 # システム構成
 
+## システム構成図
+
+![スマホからAPI Gateway・Lambda・DynamoDBへ計測データを送り、Streamsで解析してWebから参照するシステム構成と担当分担。画面はS3から直接HTTPS配信する案。](assets/system-architecture.jpg)
+
+[構成図を拡大する](assets/system-architecture.jpg)
+
+提供された図は、S3のオブジェクトURLから画面を直接HTTPS配信する案です。下のデータフローは、CloudFrontで画面を配信する初期案を示します。いずれも構成案であり、AWSリソースは未実装です。
+
+## データフロー（初期案）
+
 ```mermaid
 flowchart LR
     Collector[スマホ計測] --> API[API Gateway]

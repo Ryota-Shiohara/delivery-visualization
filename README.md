@@ -4,6 +4,12 @@
 
 元の[システム概要](フードデリバリー品質管理・路面評価マッピングシステム_概要.md)を設計の出発点とします。[collectorのブラウザ版プロトタイプ](apps/collector/README.md)は実装済みです。ダッシュボード、API、解析処理、AWSリソースはまだ実装されていません。
 
+## システム構成図
+
+![フードデリバリー品質管理・路面評価マッピングシステムの構成図。スマホ計測、AWSでの受信・保存・解析、Webからの参照、S3による画面配信と担当分担を示す。](docs/assets/system-architecture.jpg)
+
+[画像を拡大する](docs/assets/system-architecture.jpg) · [構成の説明](docs/architecture.md)
+
 ## ディレクトリ構成
 
 ```text
@@ -21,6 +27,7 @@ delivery-visualization/
 ├── data/
 │   └── samples/             # 全員：架空の連携用サンプル
 ├── docs/
+│   ├── assets/              # システム構成図などの文書用画像
 │   ├── architecture.md      # 構成・責務・データフロー
 │   ├── development.md       # 開発の順序・完了条件
 │   ├── course-requirements.md # 授業資料との照合・年度差
