@@ -1,0 +1,57 @@
+10/11
+Cの解析結果のJSON形式案を共有します。
+
+解析結果は以下の3種類に分ける予定です。
+
+1. `delivery-analysisDB`：計測1件ごとの解析結果（measurementId、deliveryId、measuredAt、qualityScore、vibration、isImpact、tiltDegrees、latitude、longitude、accuracyMeters、speedMetersPerSecond、algorithmVersion）
+2. `delivery-summaryDB`：配送ごとの集計（deliveryId、sampleCount、impactCount、avgScore、maxVibration、maxTilt、updatedAt）
+3. `delivery-cellDB`：GPS区画ごとの集計（cellId、centerLat、centerLon、sampleCount、avgVibration、maxVibration、impactCount、evalStatus、updatedAt）
+
+1件の計測に対する解析結果（delivery-analysisDB）
+{
+  "measurementId": "sample-measurement-0001",
+  "deliveryId": "sample-delivery-001",
+  "measuredAt": "2026-10-05T00:00:00.000Z",
+  "qualityScore": 95.0,
+  "vibration": 0.0,
+  "isImpact": false,
+  "tiltDegrees": 2.5,
+  "latitude": 35.0,
+  "longitude": 139.0,
+  "accuracyMeters": 5.0,
+  "speedMetersPerSecond": 3.0,
+  "algorithmVersion": "prototype-0.3"
+}
+
+Dは1件ごとの解析結果だけでなく、配送全体や地点ごとのデータも使います。
+② 配送ごとの集計（delivery-summaryDB）
+
+{
+  "deliveryId": "sample-delivery-001",
+  "sampleCount": 100,
+  "impactCount": 3,
+  "avgScore": 92.5,
+  "maxVibration": 4.2,
+  "maxTilt": 12.0,
+  "updatedAt": "2026-10-05T01:00:00.000Z"
+}
+
+③ GPS区画ごとの集計（delivery-cellDB）
+
+{
+  "cellId": "70000_278000",
+  "centerLat": 35.0,
+  "centerLon": 139.0,
+  "sampleCount": 12,
+  "avgVibration": 1.25,
+  "maxVibration": 3.8,
+  "impactCount": 2,
+  "evalStatus": "evaluated",
+  "updatedAt": "2026-10-05T01:00:00.000Z"
+}
+
+
+
+Web側では、参照Lambdaからこれらのテーブルの必要なデータを取得して表示する構成を想定しています。
+
+なお、集計項目や評価基準は現時点では暫定案です。
