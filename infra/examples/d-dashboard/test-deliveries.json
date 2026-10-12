@@ -1,0 +1,10 @@
+{
+  "version": "2.0",
+  "rawPath": "/api/deliveries",
+  "rawQueryString": "",
+  "requestContext": {
+    "http": {
+      "method": "GET"
+    }
+  }
+}

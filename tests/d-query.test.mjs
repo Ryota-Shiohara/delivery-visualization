@@ -1,0 +1,25 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {readFile,mkdir} from 'node:fs/promises';
+import {spawn} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {validateRecords,readQuery,InputError} from '../services/query/local-contract.mjs';
+const source=JSON.parse(await readFile(new URL('../data/samples/d-dashboard/c-shared-example.json',import.meta.url),'utf8'));
+test('C共有の3種類を変更せず受け入れる',()=>{for(const type of ['analysis','summaries','cells'])assert.deepEqual(validateRecords(type,source[type]),source[type]);});
+test('100件の集計を1件の解析結果から再計算しない',()=>{const detail=readQuery(source,'/api/deliveries/sample-delivery-001');assert.equal(detail.summary.sampleCount,100);assert.equal(detail.summary.avgScore,92.5);assert.equal(detail.measurements.length,1);assert.equal(detail.measurements[0].qualityScore,95);});
+test('DynamoDB JSONのfalse、数値、NULLを正しく解釈する',()=>{const row=Object.fromEntries(Object.entries(source.analysis[0]).map(([key,value])=>[key,typeof value==='string'?{S:value}:typeof value==='boolean'?{BOOL:value}:{N:String(value)}]));row.latitude={NULL:true};row.longitude={NULL:true};row.accuracyMeters={NULL:true};const result=validateRecords('analysis',{Items:[row]})[0];assert.equal(result.isImpact,false);assert.equal(result.qualityScore,95);assert.equal(result.latitude,null);assert.equal(result.accuracyMeters,null);});
+test('GPS未取得と傾斜未取得の計測を残す',()=>{const row={...source.analysis[0],latitude:null,longitude:null,accuracyMeters:null,tiltDegrees:null,speedMetersPerSecond:null};assert.equal(validateRecords('analysis',[row]).length,1);});
+test('型不正・重複ID・GPS範囲外を拒否する',()=>{assert.throws(()=>validateRecords('analysis',[{...source.analysis[0],isImpact:'false'}]),InputError);assert.throws(()=>validateRecords('analysis',[source.analysis[0],source.analysis[0]]),/重複/);assert.throws(()=>validateRecords('analysis',[{...source.analysis[0],latitude:100}]),/範囲/);assert.throws(()=>validateRecords('cells',[{...source.cells[0],sampleCount:-1}]),/整数/);});
+test('存在しない配送と不正なページングに応答する',()=>{assert.equal(readQuery(source,'/api/deliveries/unknown'),null);assert.throws(()=>readQuery(source,'/api/deliveries/sample-delivery-001',new URLSearchParams('limit=0')),InputError);});
+test('未知のevalStatusは勝手に分類しない',()=>{const cells=validateRecords('cells',[{...source.cells[0],evalStatus:'pending_c_confirmation'}]);assert.equal(cells[0].evalStatus,'pending_c_confirmation');});
+let child,base;
+before(async()=>{
+ const localDir=fileURLToPath(new URL(`../.local/test-${Date.now()}/`,import.meta.url));await mkdir(localDir,{recursive:true});
+ child=spawn(process.execPath,[fileURLToPath(new URL('../scripts/local-dashboard-server.mjs',import.meta.url))],{env:{...process.env,DASHBOARD_PORT:'0',D_LOCAL_DATA_DIR:localDir},stdio:['ignore','pipe','pipe']});
+ await new Promise((resolve,reject)=>{let output='';const timeout=setTimeout(()=>reject(new Error('ローカルサーバーの起動待ちがタイムアウト')),10000);child.stdout.on('data',chunk=>{output+=chunk;const match=output.match(/http:\/\/127\.0\.0\.1:\d+/);if(match){base=match[0];clearTimeout(timeout);resolve();}});child.once('error',reject);child.once('exit',code=>{if(!base)reject(new Error(`起動失敗 ${code}`));});});
+});
+after(()=>child?.kill());
+const post=(route,payload)=>fetch(base+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+test('HTTP：C共有例へ切り替え、一覧・詳細・区画・画面を取得できる',async()=>{assert.equal((await post('/api/local/reset',{mode:'c-example'})).status,200);const list=await(await fetch(base+'/api/deliveries')).json();assert.equal(list.items.length,1);const detail=await(await fetch(base+'/api/deliveries/sample-delivery-001')).json();assert.equal(detail.measurements.length,1);assert.equal(detail.summary.sampleCount,100);assert.equal((await fetch(base+'/api/cells')).status,200);const html=await fetch(base+'/');assert.equal(html.status,200);assert.match(html.headers.get('content-type'),/text\/html/);});
+test('HTTP：一括取り込み失敗時は既存データを一切変えない',async()=>{const response=await post('/api/local/import',{type:'bundle',records:{analysis:source.analysis,summaries:[{...source.summaries[0],sampleCount:-1}],cells:source.cells}});assert.equal(response.status,400);const data=await(await fetch(base+'/api/local/export')).json();assert.equal(data.mode,'c-example');assert.equal(data.summaries[0].sampleCount,100);assert.equal(data.sources.analysis,'C共有例');});
+test('HTTP：種類別取り込みは出所を記録し、404と他Originも処理する',async()=>{const response=await post('/api/local/import',{type:'cells',records:source.cells});assert.equal(response.status,200);const data=await(await fetch(base+'/api/local/export')).json();assert.equal(data.sources.cells,'取り込みJSON');assert.equal(data.sources.analysis,'C共有例');assert.equal((await fetch(base+'/api/deliveries/missing')).status,404);const forbidden=await fetch(base+'/api/local/reset',{method:'POST',headers:{'Content-Type':'application/json','Origin':'http://example.com'},body:'{"mode":"empty"}'});assert.equal(forbidden.status,403);});

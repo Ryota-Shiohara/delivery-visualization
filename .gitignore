@@ -44,3 +44,6 @@ test-results/
 Thumbs.db
 .idea/
 *.swp
+
+# Dのローカル検証・AWSパッケージ作業用
+.local/

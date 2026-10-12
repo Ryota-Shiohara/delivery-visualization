@@ -78,3 +78,12 @@ CloudFormationなどのAWS CLIコマンドも同じ `.env` を使うには、`aw
 必要な権限はSTSの本人確認、S3のバケット確認・オブジェクト書き込み、CloudFrontのディストリビューション取得・無効化作成・無効化状態取得です。`AccessDenied` が出た場合はLabでその操作が許可されているか確認してください。OACによる公開閲覧の権限は別途バケットポリシーで設定します。
 
 これはWeb画面の配信のみです。計測データはcollectorの計測中に30件ずつ、または1秒経過時にAPIへ自動送信します。未送信分は画面の「APIへ送信」から手動再送できます。デプロイスクリプトは計測データを送信しません。
+
+## D担当のローカル起動・検証・パッケージ
+
+- `npm run dev:d`：PC内の参照APIと画面を起動。
+- `npm run test:d`：C形式・ローカルAPI・AWSアダプターの15項目を検証。
+- `npm run package:d`：WindowsでLambda用ZIP・S3画面用ZIP・設定例を `.local/artifacts/` に作成。AWS操作は行わない。
+- `node scripts/create-d-samples.mjs`：架空デモとC共有例を再生成。
+
+[利用手順](../D担当_はじめに.md)と[AWS構築手順](../docs/deployment/d-dashboard-aws.md)を参照。Dの画面はcollectorのビルドや依存パッケージと独立している。
