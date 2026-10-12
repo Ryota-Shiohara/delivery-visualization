@@ -63,3 +63,5 @@ Node.js 20以上で、依存パッケージのインストールやビルドな�
 - [AWS仮環境の確認記録](docs/reports/d-aws-verification.md)
 
 `npm run test:d` でローカル/API検証15項目を実行します。`npm run package:d` はWindows上でアップロード用ZIPを `.local/artifacts/` に作成するだけで、AWS操作は行いません。
+
+DのAWS環境をコマンド1回で作成・更新する場合は [Dの構築自動化手順](docs/deployment/d-dashboard-automated.md) を参照してください。Cの既存テーブル接続と、仮テーブル3つ・共有サンプルの作成に対応します。

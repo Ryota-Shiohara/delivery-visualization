@@ -77,3 +77,7 @@ npm run test:d
 ```
 
 自動テスト15項目はローカル/APIアダプターを検証します。AWSの仮表示については確認記録を参照してください。Cの実解析・実測走行・最終統合テーブルへの接続は未確認です。
+
+## AWSの構築自動化
+
+今回のS3・API Gateway・LambdaとDynamoDB接続を1回のコマンドで構築する方法は [Dの自動構築手順](docs/deployment/d-dashboard-automated.md) を参照してください。PC内の仮環境とは独立して構築できます。

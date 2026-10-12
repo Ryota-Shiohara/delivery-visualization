@@ -1,8 +1,11 @@
-import {mkdir,readFile,writeFile,copyFile,cp} from 'node:fs/promises';
+import {mkdir,readFile,writeFile,copyFile,cp,rm} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import path from 'node:path';
 const root=fileURLToPath(new URL('../',import.meta.url)),destination=path.join(root,'.local/artifacts');
 const stage=path.join(root,'.local/aws-build'),lambda=path.join(stage,'lambda'),web=path.join(stage,'web/dashboard');
+// 作業先はリポジトリ内の固定パスのみ。古いZIP内容や画面ファイルを混ぜない。
+if(path.resolve(stage)!==path.resolve(root,'.local','aws-build'))throw new Error('Unexpected staging path');
+await rm(stage,{recursive:true,force:true});
 await mkdir(lambda,{recursive:true});await mkdir(web,{recursive:true});
 for(const name of ['index.mjs','aws-handler-core.mjs','local-contract.mjs'])await copyFile(path.join(root,'services/query',name),path.join(lambda,name));
 for(const name of ['demo.json','c-shared-example.json'])await copyFile(path.join(root,'data/samples/d-dashboard',name),path.join(lambda,name));

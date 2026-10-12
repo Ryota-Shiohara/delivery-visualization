@@ -1,0 +1,159 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: D query HTTP API, Lambda and optional prototype result tables.
+Parameters:
+  DashboardBucketName:
+    Type: String
+  ArtifactBucketName:
+    Type: String
+  LambdaCodeKey:
+    Type: String
+  TableMode:
+    Type: String
+    Default: existing
+    AllowedValues: [existing, prototype]
+  AnalysisTableName:
+    Type: String
+    Default: ''
+  SummaryTableName:
+    Type: String
+    Default: ''
+  CellTableName:
+    Type: String
+    Default: ''
+  MaxTableItems:
+    Type: Number
+    Default: 5000
+    MinValue: 1
+    MaxValue: 5000
+Rules:
+  ExistingTablesRequired:
+    RuleCondition: !Equals [!Ref TableMode, existing]
+    Assertions:
+      - Assert: !Not [!Equals [!Ref AnalysisTableName, '']]
+        AssertDescription: Specify AnalysisTableName in existing mode.
+      - Assert: !Not [!Equals [!Ref SummaryTableName, '']]
+        AssertDescription: Specify SummaryTableName in existing mode.
+      - Assert: !Not [!Equals [!Ref CellTableName, '']]
+        AssertDescription: Specify CellTableName in existing mode.
+Conditions:
+  CreatePrototypeTables: !Equals [!Ref TableMode, prototype]
+Resources:
+  PrototypeAnalysisTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreatePrototypeTables
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: measurementId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: measurementId
+          KeyType: HASH
+  PrototypeSummaryTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreatePrototypeTables
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: deliveryId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: deliveryId
+          KeyType: HASH
+  PrototypeCellTable:
+    Type: AWS::DynamoDB::Table
+    Condition: CreatePrototypeTables
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: cellId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: cellId
+          KeyType: HASH
+  QueryFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: nodejs22.x
+      Handler: index.handler
+      MemorySize: 256
+      Timeout: 30
+      Role: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/LabRole'
+      Code:
+        S3Bucket: !Ref ArtifactBucketName
+        S3Key: !Ref LambdaCodeKey
+      Environment:
+        Variables:
+          DATA_MODE: dynamodb
+          ANALYSIS_TABLE: !If [CreatePrototypeTables, !Ref PrototypeAnalysisTable, !Ref AnalysisTableName]
+          SUMMARY_TABLE: !If [CreatePrototypeTables, !Ref PrototypeSummaryTable, !Ref SummaryTableName]
+          CELL_TABLE: !If [CreatePrototypeTables, !Ref PrototypeCellTable, !Ref CellTableName]
+          MAX_TABLE_ITEMS: !Sub '${MaxTableItems}'
+  QueryLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${QueryFunction}'
+      RetentionInDays: 7
+  QueryApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub '${AWS::StackName}-query'
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowOrigins:
+          - !Sub 'https://${DashboardBucketName}.s3.${AWS::Region}.${AWS::URLSuffix}'
+        AllowMethods: [GET, OPTIONS]
+        AllowHeaders: [Content-Type]
+        MaxAge: 300
+  QueryIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref QueryApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !GetAtt QueryFunction.Arn
+      PayloadFormatVersion: '2.0'
+      TimeoutInMillis: 29000
+  QueryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref QueryApi
+      RouteKey: 'GET /api/{proxy+}'
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${QueryIntegration}'
+  QueryStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref QueryApi
+      StageName: '$default'
+      AutoDeploy: true
+      DefaultRouteSettings:
+        ThrottlingRateLimit: 5
+        ThrottlingBurstLimit: 10
+  QueryInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref QueryFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:${AWS::Partition}:execute-api:${AWS::Region}:${AWS::AccountId}:${QueryApi}/*/GET/api/*'
+Outputs:
+  DeploymentKind:
+    Value: DDashboardBackendV1
+  ApiBaseUrl:
+    Value: !GetAtt QueryApi.ApiEndpoint
+  QueryFunctionName:
+    Value: !Ref QueryFunction
+  TableMode:
+    Value: !Ref TableMode
+  AnalysisTableName:
+    Value: !If [CreatePrototypeTables, !Ref PrototypeAnalysisTable, !Ref AnalysisTableName]
+  SummaryTableName:
+    Value: !If [CreatePrototypeTables, !Ref PrototypeSummaryTable, !Ref SummaryTableName]
+  CellTableName:
+    Value: !If [CreatePrototypeTables, !Ref PrototypeCellTable, !Ref CellTableName]
