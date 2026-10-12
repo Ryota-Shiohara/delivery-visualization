@@ -61,7 +61,10 @@ $previous = @{}
 foreach ($key in $credentialKeys) {
     $previous[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
 }
+$previousFileEncoding = [Environment]::GetEnvironmentVariable('AWS_CLI_FILE_ENCODING', 'Process')
 try {
+    # リポジトリのYAMLはUTF-8。日本語Windowsのcp932既定値を使わせない。
+    [Environment]::SetEnvironmentVariable('AWS_CLI_FILE_ENCODING', 'UTF-8', 'Process')
     foreach ($key in $credentialKeys) {
         $value = if (-not $Profile -and $settings.ContainsKey($key)) { $settings[$key] } else { $null }
         [Environment]::SetEnvironmentVariable($key, $value, 'Process')
@@ -74,6 +77,7 @@ try {
     }
     $output
 } finally {
+    [Environment]::SetEnvironmentVariable('AWS_CLI_FILE_ENCODING', $previousFileEncoding, 'Process')
     foreach ($key in $credentialKeys) {
         [Environment]::SetEnvironmentVariable($key, $previous[$key], 'Process')
     }

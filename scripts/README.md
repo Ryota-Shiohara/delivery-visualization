@@ -4,11 +4,20 @@
 
 認証情報の埋め込み、実測位置情報のログ出力、pushは行いません。collectorの配信更新スクリプトはユーザーの依頼により追加しました。エージェントはデプロイを実行しません。
 
-## collectorを既存のS3＋CloudFrontに配信する
+## collectorをS3またはS3＋CloudFrontに配信する
 
 `deploy-collector.ps1` はAWS Academyの一時認証情報をAWS CLI経由で使用します。S3、CloudFront、OACの初回作成は行いません。既存の配信先の更新用です。PowerShell 5.1以降、AWS CLI v2、Node.js 20.19以降の20系または22.12以降が必要です。
 
 初回作成もコードで管理する場合は `infra/collector.yaml` を使います。[基盤の作成とスタック出力の連携手順](../infra/README.md#collectorの配信基盤)に従えば、以下の手動設定の代わりにCloudFormationで作成できます。
+
+現在のAWS Academyでは、CloudFront権限を必要としない `infra/collector-s3.yaml` を使います。[S3だけでHTTPS配信する手順](../infra/README.md#現在のaws-academy用s3だけでhttps配信)に従ってバケットを作成したら、`-DistributionId` を省略して実行します。
+
+```powershell
+.\scripts\deploy-collector.ps1 -BucketName '<S3用スタックのバケット名>' -WhatIf
+.\scripts\deploy-collector.ps1 -BucketName '<S3用スタックのバケット名>'
+```
+
+省略時は `site/` に配信し、CloudFrontへの問い合わせ・キャッシュ無効化を行いません。バケットの実際のリージョンから `/site/index.html` のHTTPS URLを表示します。公開設定はテンプレート側の責務で、配信スクリプトは変更しません。HTML・JS・CSSのみを置いてください。以下のCloudFront向け初回設定はS3用テンプレートを使う場合は不要です。
 
 ### 初回の準備
 
@@ -53,6 +62,8 @@ AWS_REGION=us-east-1
 以前の認証方式も `-Profile academy` で使用できます。その場合は `.env` を読み込まず、プロファイルを使用します。`-Profile` と `-EnvFile` は同時に指定できません。
 
 CloudFormationなどのAWS CLIコマンドも同じ `.env` を使うには、`aws-with-env.ps1` 経由で実行します。通常の `aws` コマンドは `.env` を自動で読み込みません。
+
+ラッパーはAWS CLI実行中に `AWS_CLI_FILE_ENCODING=UTF-8` を設定します。日本語Windowsの既定文字コードcp932で、日本語コメントを含むYAMLの読み込みが失敗する問題を防ぎます。終了時には元の設定を復元します。`.env` への追加設定は不要です。
 
 ```powershell
 .\scripts\aws-with-env.ps1 -Arguments @('sts', 'get-caller-identity')

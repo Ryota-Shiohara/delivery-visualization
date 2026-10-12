@@ -5,7 +5,6 @@ param(
     [ValidatePattern('^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$')]
     [string]$BucketName,
 
-    [Parameter(Mandatory = $true)]
     [ValidatePattern('^[A-Z0-9]+$')]
     [string]$DistributionId,
 
@@ -20,14 +19,18 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $collectorPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'apps/collector'
 $distPath = Join-Path $collectorPath 'dist'
-$destination = "s3://$BucketName/"
+$destination = if ($DistributionId) { "s3://$BucketName/" } else { "s3://$BucketName/site/" }
 
 # WhatIf はローカルビルドも AWS 通信も行わず、実行内容だけを表示する。
 if ($WhatIfPreference) {
     Write-Host "Preview: npm ci -> npm test -> npm run build ($collectorPath)"
-    Write-Host "Preview: check AWS identity, bucket and CloudFront origin ($DistributionId)"
+    Write-Host "Preview: check AWS identity and bucket ($BucketName)"
     Write-Host "Preview: upload assets first, then index.html to $destination (no deletion)"
-    Write-Host "Preview: invalidate /* on $DistributionId and wait for completion"
+    if ($DistributionId) {
+        Write-Host "Preview: check CloudFront origin, invalidate /* on $DistributionId and wait"
+    } else {
+        Write-Host 'Preview: S3-only HTTPS hosting at /site/index.html (no CloudFront calls)'
+    }
     return
 }
 
@@ -62,24 +65,33 @@ if ($ExpectedAccountId -and $identity.Account -ne $ExpectedAccountId) {
 }
 Write-Host "AWS account: $($identity.Account)"
 Invoke-Aws -Arguments @('s3api', 'head-bucket', '--bucket', $BucketName) | Out-Null
-$distribution = (Invoke-Aws -Arguments @('cloudfront', 'get-distribution', '--id', $DistributionId, '--output', 'json')) -join "`n" | ConvertFrom-Json
-$config = $distribution.Distribution.DistributionConfig
-$originId = $config.DefaultCacheBehavior.TargetOriginId
-$origins = @($config.Origins.Items | Where-Object { $_.Id -eq $originId })
-if ($origins.Count -ne 1) { throw 'Cannot identify the default CloudFront origin.' }
-$origin = $origins[0]
-$bucketDomainPattern = '^' + [regex]::Escape($BucketName) + '\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$'
-if ($origin.DomainName -notmatch $bucketDomainPattern -or $origin.OriginPath) {
-    throw "Default CloudFront origin must point to the root of $BucketName via its S3 REST endpoint."
-}
-if (-not $config.Enabled -or $config.DefaultRootObject -ne 'index.html') {
-    throw 'CloudFront must be enabled with Default root object set to index.html.'
-}
-if ($config.DefaultCacheBehavior.ViewerProtocolPolicy -notin @('redirect-to-https', 'https-only')) {
-    throw 'CloudFront Viewer protocol policy must require HTTPS.'
+if ($DistributionId) {
+    $distribution = (Invoke-Aws -Arguments @('cloudfront', 'get-distribution', '--id', $DistributionId, '--output', 'json')) -join "`n" | ConvertFrom-Json
+    $config = $distribution.Distribution.DistributionConfig
+    $originId = $config.DefaultCacheBehavior.TargetOriginId
+    $origins = @($config.Origins.Items | Where-Object { $_.Id -eq $originId })
+    if ($origins.Count -ne 1) { throw 'Cannot identify the default CloudFront origin.' }
+    $origin = $origins[0]
+    $bucketDomainPattern = '^' + [regex]::Escape($BucketName) + '\.s3(?:[.-][a-z0-9-]+)?\.amazonaws\.com$'
+    if ($origin.DomainName -notmatch $bucketDomainPattern -or $origin.OriginPath) {
+        throw "Default CloudFront origin must point to the root of $BucketName via its S3 REST endpoint."
+    }
+    if (-not $config.Enabled -or $config.DefaultRootObject -ne 'index.html') {
+        throw 'CloudFront must be enabled with Default root object set to index.html.'
+    }
+    if ($config.DefaultCacheBehavior.ViewerProtocolPolicy -notin @('redirect-to-https', 'https-only')) {
+        throw 'CloudFront Viewer protocol policy must require HTTPS.'
+    }
+    $collectorUrl = "https://$($distribution.Distribution.DomainName)/"
+} else {
+    $location = (Invoke-Aws -Arguments @('s3api', 'get-bucket-location', '--bucket', $BucketName, '--output', 'json')) -join "`n" | ConvertFrom-Json
+    $bucketRegion = $location.LocationConstraint
+    if (-not $bucketRegion) { $bucketRegion = 'us-east-1' }
+    if ($bucketRegion -eq 'EU') { $bucketRegion = 'eu-west-1' }
+    $collectorUrl = "https://$BucketName.s3.$bucketRegion.amazonaws.com/site/index.html"
 }
 
-if (-not $PSCmdlet.ShouldProcess("$destination / CloudFront $DistributionId", 'Build and deploy collector')) {
+if (-not $PSCmdlet.ShouldProcess($destination, 'Build and deploy collector')) {
     return
 }
 
@@ -101,8 +113,10 @@ Invoke-Aws -Arguments @('s3', 'cp', $distPath, $destination, '--recursive', '--e
 Invoke-Aws -Arguments @('s3', 'cp', (Join-Path $distPath 'assets'), ($destination + 'assets/'), '--recursive', '--cache-control', 'public,max-age=31536000,immutable', '--only-show-errors') | Out-Host
 # assets の転送成功後にトップページを切り替える。
 Invoke-Aws -Arguments @('s3', 'cp', (Join-Path $distPath 'index.html'), ($destination + 'index.html'), '--content-type', 'text/html', '--cache-control', 'no-cache', '--only-show-errors') | Out-Host
-$invalidation = (Invoke-Aws -Arguments @('cloudfront', 'create-invalidation', '--distribution-id', $DistributionId, '--paths', '/*', '--output', 'json')) -join "`n" | ConvertFrom-Json
-$invalidationId = $invalidation.Invalidation.Id
-Write-Host "Invalidation: $invalidationId (waiting for completion)"
-Invoke-Aws -Arguments @('cloudfront', 'wait', 'invalidation-completed', '--distribution-id', $DistributionId, '--id', $invalidationId) | Out-Null
-Write-Host "Collector deployed: https://$($distribution.Distribution.DomainName)/"
+if ($DistributionId) {
+    $invalidation = (Invoke-Aws -Arguments @('cloudfront', 'create-invalidation', '--distribution-id', $DistributionId, '--paths', '/*', '--output', 'json')) -join "`n" | ConvertFrom-Json
+    $invalidationId = $invalidation.Invalidation.Id
+    Write-Host "Invalidation: $invalidationId (waiting for completion)"
+    Invoke-Aws -Arguments @('cloudfront', 'wait', 'invalidation-completed', '--distribution-id', $DistributionId, '--id', $invalidationId) | Out-Null
+}
+Write-Host "Collector deployed: $collectorUrl"

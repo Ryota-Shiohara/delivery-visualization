@@ -23,6 +23,37 @@ EC2は使用しません。解析が書き込む結果テーブルから同じ�
 
 ## collectorの配信基盤
 
+### 現在のAWS Academy用：S3だけでHTTPS配信
+
+CloudFrontの作成権限がないLabでは `collector-s3.yaml` を使います。CloudFormationでS3バケットとバケットポリシーを作成します。公開読み取りは配信用の `site/*` に限定し、HTTPSでの取得だけを許可します。匿名の書き込み・バケット一覧取得は許可しません。認証情報や計測データはこの配信用プレフィックスへ置きません。
+
+S3の通常のRESTエンドポイントの `/site/index.html` を開きます。静的ウェブサイトホスティングは設定しません。ルートURLの自動トップページ表示、独自ドメイン、CloudFrontのキャッシュ・配信機能はありません。計測データは端末内の保存を継続します。
+
+リポジトリ直下の `.env` 設定後、次を順に実行します。ラッパーがAWS CLIにUTF-8を指定するので、日本語WindowsでもYAMLを読めます。
+
+```powershell
+# リソースを作成しない構文検証
+.\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'validate-template', '--template-body', 'file://infra/collector-s3.yaml')
+
+# 別のスタック名でS3用基盤を作成する
+.\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'deploy', '--template-file', 'infra/collector-s3.yaml', '--stack-name', 'delivery-collector-s3', '--no-fail-on-empty-changeset')
+
+# 作成されたバケット名を取得
+$bucket = .\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'describe-stacks', '--stack-name', 'delivery-collector-s3', '--query', 'Stacks[0].Outputs[?OutputKey==`BucketName`].OutputValue | [0]', '--output', 'text')
+
+# プレビュー後、実際に配信する場合に実行
+.\scripts\deploy-collector.ps1 -BucketName $bucket -WhatIf
+.\scripts\deploy-collector.ps1 -BucketName $bucket
+```
+
+各ステップの成功を確認してから次に進みます。最後に表示されるHTTPS URLをスマホで開き、センサ許可・校正・計測・保存・JSON出力を確認してください。画面更新時も同じ配信スクリプトを使います。
+
+以前の `delivery-collector` が `ROLLBACK_COMPLETE` の場合も、上の新しいスタック名で進められます。失敗スタックと保持バケットは自動で削除しません。不要になったものは別途確認して片付けてください。新しいS3用バケットもスタック削除時に保持されます。
+
+必要な操作はCloudFormationとS3のみです。アカウント全体の公開アクセス制限や組織の制限が追加された場合は、公開ポリシーの設定が拒否されることがあります。
+
+### CloudFrontを利用できるアカウント用
+
 `collector.yaml` で以下をまとめて作成・更新します。
 
 - 非公開S3バケット（名前はCloudFormationが生成、ACL無効、SSE-S3暗号化）

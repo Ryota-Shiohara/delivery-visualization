@@ -1,0 +1,44 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Collector HTTPS hosting directly from the S3 REST endpoint.
+
+Resources:
+  CollectorBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: false
+        RestrictPublicBuckets: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  CollectorBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref CollectorBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          # 公開対象は配信用site/のみ。書き込みと一覧取得は公開しない。
+          - Sid: PublicReadCollectorSiteOverHttps
+            Effect: Allow
+            Principal: '*'
+            Action: s3:GetObject
+            Resource: !Sub '${CollectorBucket.Arn}/site/*'
+            Condition:
+              Bool:
+                aws:SecureTransport: 'true'
+
+Outputs:
+  BucketName:
+    Value: !Ref CollectorBucket
+  CollectorUrl:
+    Value: !Sub 'https://${CollectorBucket.RegionalDomainName}/site/index.html'
