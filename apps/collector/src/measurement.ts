@@ -1,6 +1,6 @@
 import type { Measurement, Orientation, Position, Reading, Session, Vector } from './types';
 
-export const MAX_SAMPLES = 30_000;
+export const MAX_SAMPLES = 100_000;
 export const GPS_MAX_AGE_MS = 5_000;
 export const SENSOR_MAX_AGE_MS = 2_000;
 

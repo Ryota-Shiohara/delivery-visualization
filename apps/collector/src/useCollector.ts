@@ -168,7 +168,7 @@ export function useCollector() {
           const tilt = orientation.current && value.measuredAt - orientation.current.at <= SENSOR_MAX_AGE_MS ? relativeTilt(orientation.current.value, baseline.current) : null;
           samples.current.push(makeMeasurement(session.current, value, tilt, position.current));
           void flush().catch(() => {});
-          if (samples.current.length >= MAX_SAMPLES) void stopRef.current('試作版の上限30,000件に達したため計測を終了しました。');
+          if (samples.current.length >= MAX_SAMPLES) void stopRef.current('試作版の上限100,000件に達したため計測を終了しました。');
         },
         onOrientation: value => { orientation.current = { value, at: Date.now() }; },
         onPosition: value => { position.current = value; setGpsMessage(mode === 'demo' ? '架空の位置情報' : '位置情報を取得中'); },

@@ -92,7 +92,7 @@ export function App() {
           <div className="field-tip"><span className="tip-number">FIELD TIP</span><p>バッグ内でスマホを固定。<br />同じ条件で、何度か走ってみよう。</p></div>
         </aside>
       </div>
-      <footer className="footer"><span>FOOD DELIVERY QUALITY PROJECT</span><span>記録上限 30,000件 / 1回</span></footer>
+      <footer className="footer"><span>FOOD DELIVERY QUALITY PROJECT</span><span>記録上限 100,000件 / 1回</span></footer>
     </main>
   </>;
 }
