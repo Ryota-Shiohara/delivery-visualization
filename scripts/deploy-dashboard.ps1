@@ -85,6 +85,7 @@ function Read-StackOutputs {
 }
 function Wait-AnalysisIndex {
     param([string]$TableName)
+    $timer = [Diagnostics.Stopwatch]::StartNew()
     for ($attempt = 1; $attempt -le 120; $attempt++) {
         $description = Read-AwsJson -Arguments @('dynamodb', 'describe-table', '--table-name', $TableName)
         $indexes = if ($description.Table.PSObject.Properties['GlobalSecondaryIndexes']) { @($description.Table.GlobalSecondaryIndexes) } else { @() }
@@ -95,11 +96,15 @@ function Wait-AnalysisIndex {
             if (@($keys | Where-Object { $_.AttributeName -eq 'deliveryId' -and $_.KeyType -eq 'HASH' }).Count -ne 1 -or @($keys | Where-Object { $_.AttributeName -eq 'measuredAt' -and $_.KeyType -eq 'RANGE' }).Count -ne 1 -or $index[0].Projection.ProjectionType -ne 'ALL') {
                 throw '索引のキーはdeliveryId/measuredAt、ProjectionはALLにしてください。'
             }
+            Write-Host "$AnalysisIndexName はACTIVEです。dashboardの構築を続けます。"
             return
         }
         if ($index[0].IndexStatus -notin @('CREATING', 'UPDATING')) { throw '索引が利用できる状態ではありません。' }
         if ($attempt -eq 120) { throw '索引の準備待ちがタイムアウトしました。ACTIVEになってから再実行してください。' }
-        if ($attempt -eq 1) { Write-Host "$AnalysisIndexName の作成完了を待っています。" }
+        if (($attempt - 1) % 6 -eq 0) {
+            $elapsedSeconds = [int][Math]::Floor($timer.Elapsed.TotalSeconds)
+            Write-Host "$AnalysisIndexName の作成完了を待っています。Table=$TableName Status=$($index[0].IndexStatus) 経過=${elapsedSeconds}秒 確認=$attempt/120"
+        }
         Start-Sleep -Seconds 5
     }
 }
