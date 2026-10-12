@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+
+  MeasurementsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: delivery-testDB
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: measurementId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: measurementId
+          KeyType: HASH
+
+  DeliveryApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: deliveryMeasurementAPI
+      StageName: dev
+
+  SaveMeasurementFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: deliverySaveMeasurement
+      Runtime: python3.14
+      Handler: lambda_B.lambda_handler
+      CodeUri: ../services/ingestion/
+
+      Role:
+        Fn::Sub: arn:aws:iam::${AWS::AccountId}:role/LabRole
+
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref MeasurementsTable
+
+      Events:
+        PostMeasurement:
+          Type: Api
+          Properties:
+            RestApiId: !Ref DeliveryApi
+            Path: /measurements
+            Method: POST
+
+Outputs:
+  MeasurementApiUrl:
+    Description: POST measurements endpoint
+    Value:
+      Fn::Sub: https://${DeliveryApi}.execute-api.${AWS::Region}.amazonaws.com/dev/measurements
