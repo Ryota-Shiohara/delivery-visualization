@@ -1,3 +1,4 @@
+import {pageLimit,encodeCursor,decodeCursor} from './pagination.mjs';
 // C担当が2026-10-11に共有した結果形式を使うローカル参照API。
 // DynamoDBのキー設計が未確定のため、AWS SDKやScanの前提を持ち込まない。
 export const TABLES = {
@@ -74,29 +75,25 @@ export function datasetMetadata(dataset) {
   return {
     mode: dataset.mode, label: dataset.label, sources: dataset.sources,
     counts: Object.fromEntries(Object.keys(TABLES).map(type=>[type,dataset[type].length])),
-    notes: ['vibrationの単位とevalStatusの全値・判定基準はC担当に確認中。', 'スコアはCの値をそのまま表示。D側で再計算しない。']
+    notes: []
   };
 }
-export function readQuery(dataset, pathname, params = new URLSearchParams()) {
-  if (pathname === '/api/deliveries') {
-    const ids = new Set([...dataset.summaries.map(r=>r.deliveryId),...dataset.analysis.map(r=>r.deliveryId)]);
-    const items = [...ids].map(deliveryId=>({
-      deliveryId,
-      summary: dataset.summaries.find(row=>row.deliveryId===deliveryId) ?? null,
-      availableAnalysisCount: dataset.analysis.filter(row=>row.deliveryId===deliveryId).length
-    })).sort((a,b)=>(b.summary?.updatedAt??'').localeCompare(a.summary?.updatedAt??'') || a.deliveryId.localeCompare(b.deliveryId));
-    return {items,meta:datasetMetadata(dataset)};
-  }
-  if (pathname.startsWith('/api/deliveries/')) {
-    let id;
-    try { id=decodeURIComponent(pathname.slice('/api/deliveries/'.length)); } catch { throw new InputError('配送IDの形式が不正です。'); }
-    const summary=dataset.summaries.find(row=>row.deliveryId===id)??null;
-    const all=dataset.analysis.filter(row=>row.deliveryId===id).sort((a,b)=>Date.parse(a.measuredAt)-Date.parse(b.measuredAt) || a.measurementId.localeCompare(b.measurementId));
-    if (!summary && !all.length) return null;
-    const limit=Number(params.get('limit')??2000),offset=Number(params.get('offset')??0);
-    if(!Number.isInteger(limit)||limit<1||limit>30000||!Number.isInteger(offset)||offset<0) throw new InputError('limitは1〜30000、offsetは0以上の整数です。');
-    return {deliveryId:id,summary,measurements:all.slice(offset,offset+limit),total:all.length,nextOffset:offset+limit<all.length?offset+limit:null,meta:datasetMetadata(dataset)};
-  }
-  if (pathname === '/api/cells') return {items:dataset.cells,scope:'全配送の地点集計',meta:datasetMetadata(dataset)};
-  return null;
+export function readQuery(dataset,pathname,params=new URLSearchParams()) {
+ const limit=pageLimit(params),scope='local:'+pathname;
+ const key=decodeCursor(params.get('cursor'),scope),offset=key?.offset??0;
+ if(!Number.isInteger(offset)||offset<0||params.has('offset'))throw new InputError('続き情報が不正です。');
+ const next=length=>offset+limit<length?encodeCursor(scope,{offset:offset+limit}):null;
+ if(pathname==='/api/deliveries'){
+  const rows=dataset.summaries.slice().sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt)||a.deliveryId.localeCompare(b.deliveryId));
+  return {items:rows.slice(offset,offset+limit).map(summary=>({deliveryId:summary.deliveryId,summary})),nextToken:next(rows.length),meta:datasetMetadata(dataset)};
+ }
+ if(pathname.startsWith('/api/deliveries/')){
+  let id;try{id=decodeURIComponent(pathname.slice('/api/deliveries/'.length));}catch{throw new InputError('配送IDが不正です。');}
+  const summary=dataset.summaries.find(row=>row.deliveryId===id)??null;
+  const all=dataset.analysis.filter(row=>row.deliveryId===id).sort((a,b)=>Date.parse(a.measuredAt)-Date.parse(b.measuredAt)||a.measurementId.localeCompare(b.measurementId));
+  if(!summary&&!all.length)return null;
+  return {deliveryId:id,summary,measurements:all.slice(offset,offset+limit),total:all.length,nextToken:next(all.length),meta:datasetMetadata(dataset)};
+ }
+ if(pathname==='/api/cells')return {items:dataset.cells.slice(offset,offset+limit),nextToken:next(dataset.cells.length),scope:'全配送の地点集計',meta:datasetMetadata(dataset)};
+ return null;
 }

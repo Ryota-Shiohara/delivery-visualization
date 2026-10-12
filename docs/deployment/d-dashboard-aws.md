@@ -322,13 +322,14 @@ C/Bがまだテーブルを完成していない場合だけ、Dのアカウン�
 | ANALYSIS_TABLE | d-prototype-analysis |
 | SUMMARY_TABLE | d-prototype-summary |
 | CELL_TABLE | d-prototype-cell |
-| MAX_TABLE_ITEMS | 5000 |
+| ANALYSIS_INDEX | DeliveryTimeIndex |
+| MAX_PAGE_ITEMS | 1000 |
 
 8. Lambdaのテストを再実行し、statusCode 200を確認します。
 9. APIの`/api/deliveries`を開き、`sample-delivery-001`と平均スコア92.5を確認します。
 10. AWS画面を更新します。**DynamoDB**と表示され、集計100件・受領計測1件の説明が出れば接続できています。
 
-このZIPの仮実装は、小規模確認のためのScanを使い、1MBごとのページを取得します。**各テーブル最大5000件／100ページ**までで、上限を超えたらエラーにします。最大30秒キャッシュするので、項目変更がすぐ見えなければ30秒後に更新します。Scanは読み取り料金が発生するため、最終統合ではB/Cとキー・インデックスを合意してQuery中心に改めます。
+このZIPは解析結果のDeliveryTimeIndexをQueryし、選んだ配送だけを1ページずつ取得します。仮テーブルをコンソールで作る場合も、索引（deliveryId / measuredAt、文字列、Projection ALL）を追加してください。累計5000件の取得制限はありません。[索引追加と更新手順](d-query-index-upgrade.md)を参照してください。
 
 Node.jsのLambdaランタイム内のAWS SDKを使う仮実装です。最終統合でSDKのバージョンを固定する場合は依存パッケージをZIPへ含めます。
 
@@ -369,7 +370,7 @@ Node.jsのLambdaランタイム内のAWS SDKを使う仮実装です。最終統
 ## 準備済み／未確認
 
 - 準備済み：S3へ上げる画面、Lambda ZIP、サンプル、設定テンプレート、手順書。
-- PCで検証済み：参照Lambdaの入力・応答、Scanページ処理・上限、C形式からの変換。
+- PCで検証済み：参照Lambdaの入力・応答、配送単位のQueryとページング、C形式からの変換。
 - 未実施：あなたのAWSへのアップロード、リソース作成、実際のAcademy権限、AWS上での表示確認。
 
 ## AWS公式資料

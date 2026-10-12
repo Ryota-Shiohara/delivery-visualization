@@ -8,4 +8,6 @@
 - 約50m区画の切り方、GPS品質の除外基準、配送終了時の確定処理は未確定。
 - 路面評価は条件をそろえた相対指標として扱う。
 
-技術選定後にハンドラ、評価ロジック、単体テストを追加します。
+解析ハンドラはanalysis1.py、構成定義はinfra/analysis.yamlです。
+
+解析結果テーブルにはDeliveryTimeIndex（deliveryId / measuredAt、文字列、Projection ALL）を定義し、Dが配送単位で計測を取得します。[既存環境への更新手順](../../docs/deployment/d-query-index-upgrade.md)を参照してください。

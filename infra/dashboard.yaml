@@ -20,11 +20,15 @@ Parameters:
   CellTableName:
     Type: String
     Default: ''
-  MaxTableItems:
+  AnalysisIndexName:
+    Type: String
+    Default: DeliveryTimeIndex
+    AllowedPattern: '[A-Za-z0-9_.-]{3,255}'
+  MaxPageItems:
     Type: Number
-    Default: 5000
+    Default: 1000
     MinValue: 1
-    MaxValue: 5000
+    MaxValue: 1000
 Rules:
   ExistingTablesRequired:
     RuleCondition: !Equals [!Ref TableMode, existing]
@@ -48,6 +52,19 @@ Resources:
       AttributeDefinitions:
         - AttributeName: measurementId
           AttributeType: S
+        - AttributeName: deliveryId
+          AttributeType: S
+        - AttributeName: measuredAt
+          AttributeType: S
+      GlobalSecondaryIndexes:
+        - IndexName: !Ref AnalysisIndexName
+          KeySchema:
+            - AttributeName: deliveryId
+              KeyType: HASH
+            - AttributeName: measuredAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
       KeySchema:
         - AttributeName: measurementId
           KeyType: HASH
@@ -94,7 +111,8 @@ Resources:
           ANALYSIS_TABLE: !If [CreatePrototypeTables, !Ref PrototypeAnalysisTable, !Ref AnalysisTableName]
           SUMMARY_TABLE: !If [CreatePrototypeTables, !Ref PrototypeSummaryTable, !Ref SummaryTableName]
           CELL_TABLE: !If [CreatePrototypeTables, !Ref PrototypeCellTable, !Ref CellTableName]
-          MAX_TABLE_ITEMS: !Sub '${MaxTableItems}'
+          ANALYSIS_INDEX: !Ref AnalysisIndexName
+          MAX_PAGE_ITEMS: !Sub '${MaxPageItems}'
   QueryLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:

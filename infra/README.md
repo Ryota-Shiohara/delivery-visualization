@@ -124,3 +124,5 @@ DはS3のHTTPSオブジェクトURL、API Gateway HTTP API、参照Lambda、C形
 ## Dの構築自動化
 
 dashboard-storage.yamlとdashboard.yamlをscripts/deploy-dashboard.ps1から順に適用します。[Dの自動構築手順](../docs/deployment/d-dashboard-automated.md)を参照してください。全体の統合構築ではBのtemplate.yamlで計測テーブルのStreamsを有効化し、Cのanalysis.yamlで解析Lambda・Streams接続・結果テーブルを作ります。Dはその結果テーブルにexistingモードで接続します。
+
+配送単位のQuery・ページ取得・UI整理とCの索引追加は [既存環境の更新手順](../docs/deployment/d-query-index-upgrade.md) を参照してください。
