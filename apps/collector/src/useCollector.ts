@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { amplitude, GPS_MAX_AGE_MS, makeMeasurement, MAX_SAMPLES, relativeTilt, SENSOR_MAX_AGE_MS } from './measurement';
-import { connectSensors, requestSensorPermissions } from './sensors';
+import { connectGps, connectSensors, requestSensorPermissions } from './sensors';
 import { downloadSession, getMeasurements, listSessions, markUploaded, saveBatch } from './storage';
 import { DEFAULT_API_URL, normalizeApiUrl } from './upload';
 import { LiveUpload, type LiveUploadStatus } from './liveUpload';
@@ -19,6 +19,7 @@ export function useCollector() {
   const [snapshot, setSnapshot] = useState(emptySnapshot);
   const [message, setMessage] = useState('スマホをバッグ内に固定してから、センサを有効にしてください。');
   const [gpsMessage, setGpsMessage] = useState('未接続');
+  const [gpsConnecting, setGpsConnecting] = useState(false);
   const [storageMessage, setStorageMessage] = useState('計測データはこのブラウザに保存されます。');
   const [wakeMessage, setWakeMessage] = useState('計測開始時に画面の点灯維持を試みます。');
   const [history, setHistory] = useState<Session[]>([]);
@@ -37,6 +38,8 @@ export function useCollector() {
   const storedCount = useRef(0);
   const pendingSave = useRef<Promise<void> | null>(null);
   const cleanup = useRef<(() => void) | null>(null);
+  const gpsCleanup = useRef<(() => void) | null>(null);
+  const gpsPending = useRef(false);
   const generation = useRef(0);
   const active = useRef(false);
   const lastSampleAt = useRef(0);
@@ -87,7 +90,7 @@ export function useCollector() {
       await flush();
       await refreshHistory();
     } catch { /* 保存失敗時もメモリからJSONを出力できる */ }
-    finally { if (mounted.current) setStopping(false); }
+    finally { liveUpload.current?.finish(); if (mounted.current) setStopping(false); }
   }
   stopRef.current = stop;
 
@@ -117,6 +120,7 @@ export function useCollector() {
       mounted.current = false;
       generation.current++;
       cleanup.current?.();
+      gpsCleanup.current?.();
       liveUpload.current?.close();
       clearInterval(uiTimer);
       clearInterval(saveTimer);
@@ -147,7 +151,7 @@ export function useCollector() {
     try {
       if (mode === 'device') await requestSensorPermissions();
       if (!mounted.current || token !== generation.current) return;
-      setGpsMessage('GPS取得待ち');
+      if (mode === 'demo') setGpsMessage('架空の位置情報');
       cleanup.current = connectSensors(mode, {
         onReading: value => {
           reading.current = value;
@@ -173,11 +177,37 @@ export function useCollector() {
     if (active.current || stopping || connectingRef.current) return;
     generation.current++;
     cleanup.current?.(); cleanup.current = null;
+    gpsCleanup.current?.(); gpsCleanup.current = null;
+    gpsPending.current = false; setGpsConnecting(false);
     reading.current = null; orientation.current = null; baseline.current = null; position.current = null;
     ticks.current = []; points.current = [];
     setEnabled(false); setCalibrated(false); setMode(next); setSnapshot(emptySnapshot);
     setGpsMessage('未接続');
     setMessage(next === 'demo' ? '模擬モードでは架空の加速度・姿勢・位置を使います。' : 'スマホを固定してセンサを有効にしてください。');
+  }
+
+  function enableGps() {
+    if (mode !== 'device' || gpsPending.current) return;
+    gpsCleanup.current?.();
+    gpsPending.current = true; setGpsConnecting(true);
+    setGpsMessage('GPSの許可・位置取得を待っています。');
+    try {
+      gpsCleanup.current = connectGps({
+        onPosition: value => {
+          position.current = value;
+          gpsPending.current = false; setGpsConnecting(false);
+          setGpsMessage('位置情報を取得しました。');
+        },
+        onGpsError: value => {
+          position.current = null;
+          gpsPending.current = false; setGpsConnecting(false);
+          setGpsMessage(value);
+        },
+      });
+    } catch {
+      gpsPending.current = false; setGpsConnecting(false);
+      setGpsMessage('GPSの利用を開始できませんでした。ブラウザと端末の位置情報設定を確認してください。');
+    }
   }
 
   function calibrate() {
@@ -225,7 +255,7 @@ export function useCollector() {
     catch { setStorageMessage('保存済みデータの読み出しに失敗しました。'); }
   }
 
-  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, message, gpsMessage, storageMessage, wakeMessage, history, apiUrl, setApiUrl, liveStatus, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
+  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, message, gpsMessage, gpsConnecting, enableGps, storageMessage, wakeMessage, history, apiUrl, setApiUrl, liveStatus, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
 }
 
 function deviceId(): string {

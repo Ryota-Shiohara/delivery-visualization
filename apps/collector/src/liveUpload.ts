@@ -1,15 +1,18 @@
-import { uploadMeasurements } from './upload';
+import { UPLOAD_BATCH_SIZE, uploadMeasurements } from './upload';
 import type { Measurement, Mode } from './types';
 
 export type LiveUploadStatus = { sent: number; pending: number; error: string | null };
 
-// センサのコールバックを通信待ちで止めず、同時リクエスト数を制限する。
 export class LiveUpload {
   private queue: Measurement[] = [];
-  private active = 0;
+  private active = false;
+  private inFlight = 0;
   private sent = 0;
   private error: string | null = null;
   private closed = false;
+  private finishing = false;
+  private partialReady = false;
+  private timer: ReturnType<typeof setTimeout> | undefined;
   private controller = new AbortController();
 
   constructor(
@@ -25,30 +28,46 @@ export class LiveUpload {
     this.pump();
   }
 
+  // 最終保存が終わったら、30件未満の端数も待たずに送る。
+  finish() { this.finishing = true; this.pump(); }
+
   close() {
     this.closed = true;
     this.queue = [];
+    clearTimeout(this.timer);
     this.controller.abort();
   }
 
   private publish() {
-    if (!this.closed) this.onStatus({ sent: this.sent, pending: this.queue.length + this.active, error: this.error });
+    if (!this.closed) this.onStatus({ sent: this.sent, pending: this.queue.length + this.inFlight, error: this.error });
   }
 
   private pump() {
-    while (!this.closed && !this.error && this.active < 6 && this.queue.length) {
-      const item = this.queue.shift()!;
-      this.active++;
-      void uploadMeasurements(this.endpoint, [item], this.mode, {
+    if (this.closed || this.error) return;
+    if (!this.active && this.queue.length && (this.queue.length >= UPLOAD_BATCH_SIZE || this.partialReady || this.finishing)) {
+      const batch = this.queue.splice(0, UPLOAD_BATCH_SIZE);
+      clearTimeout(this.timer); this.timer = undefined; this.partialReady = false;
+      this.active = true; this.inFlight = batch.length;
+      void uploadMeasurements(this.endpoint, batch, this.mode, {
         signal: this.controller.signal, sentIds: new Set(),
-        onSent: this.onSent, onProgress: () => {},
-      }).then(() => { this.sent++; }).catch(error => {
-        this.error ??= error instanceof Error ? error.message : '送信に失敗しました。';
+        onSent: async id => {
+          await this.onSent(id);
+          this.sent++; this.inFlight--; this.publish();
+        },
+        onProgress: () => {},
+      }).catch(error => {
+        this.error = error instanceof Error ? error.message : '送信に失敗しました。';
         this.queue = [];
+        clearTimeout(this.timer); this.timer = undefined;
       }).finally(() => {
-        this.active--;
-        this.pump();
+        this.active = false; this.inFlight = 0;
+        this.pump(); this.publish();
       });
+    }
+    if (this.queue.length && !this.timer && !this.partialReady && !this.finishing) {
+      this.timer = setTimeout(() => {
+        this.timer = undefined; this.partialReady = true; this.pump();
+      }, 1000);
     }
     this.publish();
   }

@@ -62,7 +62,7 @@ export function App() {
               {c.recording ? <button className="button stop" onClick={() => void c.stop()}><span className="stop-icon" aria-hidden="true" />計測を終了して保存</button> : <button className="button record" onClick={() => void c.start()} disabled={!s.sensorFresh || !c.enabled || c.stopping || c.connecting || c.liveStatus.pending > 0}><span className="record-icon" aria-hidden="true" />{c.stopping ? '記録を保存中…' : c.liveStatus.pending > 0 ? 'APIへ送信中…' : '計測を開始する'}</button>}
               <button className="button dark-secondary" disabled={s.count === 0 || c.recording || c.stopping} onClick={() => void c.exportCurrent()}>JSON出力</button>
             </div>
-            <p className="live-note">計測開始後、各サンプルの加速度・位置情報をAPIへ自動送信します。</p>
+            <p className="live-note">加速度・位置情報を30件ずつ、または1秒経過時にAPIへ自動送信します。</p>
             <p className="live-note" role="status">API送信済み {c.liveStatus.sent.toLocaleString()}件 · 送信待ち {c.liveStatus.pending.toLocaleString()}件{c.liveStatus.error && ` · 自動送信停止：${c.liveStatus.error} 計測終了後に未送信分を再送してください。`}</p>
             <p className="live-note">{c.wakeMessage}</p>
           </section>
@@ -73,7 +73,9 @@ export function App() {
             <div className="section-heading"><h2 id="position-title">現在の位置</h2><span className="mini-tag">{c.mode === 'demo' ? 'SAMPLE' : 'GPS'}</span></div>
             <div className="position-illustration" aria-hidden="true"><svg viewBox="0 0 320 132"><path className="map-line" d="M0 30H320M0 100H320M55 0V132M220 0V132M0 132L140 0M120 132L260 0" /><path className="route-line" d="M55 115V100H160Q180 100 180 80V65Q180 48 200 48H255" /><circle className="map-halo" cx="180" cy="80" r="19" /><circle className="map-pin" cx="180" cy="80" r="6" /></svg><span>GPSイメージ（実際の地図ではありません）</span></div>
             <dl className="position-data"><div><dt>緯度</dt><dd>{decimal(s.position?.latitude, 6)}</dd></div><div><dt>経度</dt><dd>{decimal(s.position?.longitude, 6)}</dd></div><div><dt>速度</dt><dd>{decimal(s.position?.speedMetersPerSecond, 1)} <small>m/s</small></dd></div><div><dt>位置の取得時刻</dt><dd>{s.position ? new Date(s.position.measuredAt).toLocaleTimeString('ja-JP') : '—'}</dd></div></dl>
-            <p className="helper">{c.gpsMessage}{!s.position && c.enabled ? '（新しい位置データを待っています）' : ''}</p>
+            {c.mode === 'device' && <button className="button secondary" onClick={c.enableGps} disabled={c.gpsConnecting}>{c.gpsConnecting ? 'GPSの許可・取得待ち…' : 'GPSを有効にする・再試行'}</button>}
+            <p className="helper" role="status">{c.gpsMessage}</p>
+            <p className="helper">{c.mode === 'demo' ? '模擬モードではGPSの許可を求めず、架空の位置を使用します。' : 'GPSを有効にして緯度・経度が表示されたら計測を開始してください。未取得・取得から5秒を超えた位置は送信データに含めません。'}</p>
           </section>
 
           <section className="panel records-panel" aria-labelledby="records-title">

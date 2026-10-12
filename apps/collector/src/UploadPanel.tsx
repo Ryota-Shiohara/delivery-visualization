@@ -43,7 +43,7 @@ export function UploadPanel({ history, disabled, apiUrl, setApiUrl }: { history:
 
   return <section className="panel upload-panel" aria-labelledby="upload-title">
     <div className="section-heading"><h2 id="upload-title">APIへ送信</h2><span className="mini-tag">POST</span></div>
-    <p className="helper">計測開始と同時に、各サンプルの加速度・位置情報をこのAPIへ自動送信します。模擬モードでは架空の値を送ります。</p>
+    <p className="helper">計測開始と同時に、加速度・位置情報を30件ずつ、または1秒経過時にこのAPIへ自動送信します。模擬モードでは架空の値を送ります。</p>
     <label className="upload-field">送信先API URL<input type="url" value={apiUrl} onChange={event => setApiUrl(event.target.value)} disabled={sending || disabled} placeholder="https://…/dev/measurements" autoCapitalize="none" spellCheck={false} /></label>
     <label className="upload-field">送る記録<select value={selectedId} onChange={event => { setSelectedId(event.target.value); setProgress(null); }} disabled={sending || disabled}>
       <option value="">記録を選択してください</option>
