@@ -39,7 +39,7 @@ npm run dev:https
 - 加速度は重力込みを優先して保存し、`includesGravity` に方式を残す。グラフは取得できれば重力除去済み加速度の大きさ。
 - 校正時と現在の重力方向の角度を傾斜とする。未校正・姿勢未取得時はnull。再校正は計測前に行う。
 - 5秒より古いGPSはnull。位置の更新頻度はブラウザ任せで、1秒間隔を保証しない。
-- IndexedDBに2秒ごとに保存し、終了時に残りを保存する。匿名端末IDはlocalStorageに保存する。
+- IndexedDBに各サンプルを順次保存し、保存完了後すぐAPIにPOSTする。保存中に届いた分は次の保存処理で扱い、終了時に残りを保存する。匿名端末IDはlocalStorageに保存する。
 - 非表示になると計測を終了する。画面消灯中・他タブでの継続計測は対象外。点灯維持の失敗・解除を表示する。
 - 1回30,000件で自動終了。ブラウザの強制終了では最後の未保存分が失われる可能性がある。途中保存の記録は「終了未確認」と表示する。
 - 保存失敗時はメモリからJSON出力・保存再試行が可能。未保存データがある間は新しい計測を開始しない。
@@ -61,7 +61,7 @@ npm run preview
 
 ## 担当BのAPIへPOSTする
 
-計測を終了して端末内に保存したら、「APIへ送信」に担当Bから受け取った完全なHTTPS URL（例：`https://<API ID>.execute-api.us-east-1.amazonaws.com/dev/measurements`）を入力し、記録を選んで「選択した記録を送信」を押します。URLはブラウザに保存します。API URLは `delivery-visualization-b` スタックの `MeasurementApiUrl` 出力から確認できます。
+計測前に「APIへ送信」に担当Bから受け取った完全なHTTPS URL（例：`https://<API ID>.execute-api.us-east-1.amazonaws.com/dev/measurements`）を入力します。「計測を開始する」で各サンプルの自動送信を開始します。未送信分は計測終了後、記録を選んで「選択した記録を送信」で再送できます。URLはブラウザに保存します。API URLは `delivery-visualization-b` スタックの `MeasurementApiUrl` 出力から確認できます。
 
 現在の初期URLは `https://0cori0yr7d.execute-api.us-east-1.amazonaws.com/dev/measurements` です。以前に送信先を保存したブラウザでは保存済みURLを優先します。画面でURLを確認・変更してから送信してください。
 
@@ -69,7 +69,7 @@ npm run preview
 
 送信中は件数・進捗を表示し、中止できます。HTTPエラー・通信エラー・15秒のタイムアウト・APIの保存確認不一致があれば停止します。APIの `{ message: 'saved', measurementId }` 応答を確認した計測IDをIndexedDBに保存するため、同じAPI URLへの再送では確認済みの分を省略します。応答を受け取れなかった場合は再送しますが、担当BのDynamoDBでは同じIDを上書きします。送信後も端末内の記録は残ります。URLを変えると別の送信先として扱います。
 
-最大30,000件は最大30,000回のリクエストになります。まず短い模擬計測で確認してください。計測中は送信せず、送信中に新しい計測を始めた場合は送信を中止します。画面を閉じると送信は中止され、保存確認済みの分から再送できます。
+各サンプルを1件ずつ即送信し、最大6件を並行処理します。通信が追いつかない分は待機するため、到着までの遅延は保証しません。計測終了後も待機分を送信し、完了までは手動再送・次の自動送信を開始しません。通信エラー時は後続の自動送信を停止し、端末内の記録から手動再送できます。最大50Hz・30,000件は最大50回/秒・30,000回のリクエストになります。模擬モードもAPIへ送信します。画面を閉じると送信は中止され、保存確認済みの分から再送できます。
 
 ### ブラウザから送信するための担当B側の変更
 
@@ -86,4 +86,4 @@ SAMの `CollectorOrigin` パラメーターは既定で `*` です。配信先�
 | `src/measurement.ts` | 計測整形・傾斜・GPS鮮度 |
 | `src/storage.ts` | IndexedDB・JSON出力 |
 | `src/useCollector.ts` | 計測状態・定期保存・点灯維持 |
-| `src/UploadPanel.tsx`・`upload.ts` | API送信画面・1件ずつのPOST・進捗・中止 |
+| `src/UploadPanel.tsx`・`upload.ts`・`liveUpload.ts` | API送信画面・1件ずつのPOST・進捗・中止 |

@@ -59,9 +59,11 @@ export function App() {
             <div className="chart-footer"><span>24秒前</span><span>現在</span></div>
             <div className="session-stats"><div><span>計測時間</span><strong>{duration(s.elapsed)}</strong></div><div><span>記録件数</span><strong>{s.count.toLocaleString()}<small> 件</small></strong></div><div><span>受信頻度</span><strong>{s.hz}<small> Hz</small></strong></div></div>
             <div className="record-actions">
-              {c.recording ? <button className="button stop" onClick={() => void c.stop()}><span className="stop-icon" aria-hidden="true" />計測を終了して保存</button> : <button className="button record" onClick={() => void c.start()} disabled={!s.sensorFresh || !c.enabled || c.stopping || c.connecting}><span className="record-icon" aria-hidden="true" />{c.stopping ? '記録を保存中…' : '計測を開始する'}</button>}
+              {c.recording ? <button className="button stop" onClick={() => void c.stop()}><span className="stop-icon" aria-hidden="true" />計測を終了して保存</button> : <button className="button record" onClick={() => void c.start()} disabled={!s.sensorFresh || !c.enabled || c.stopping || c.connecting || c.liveStatus.pending > 0}><span className="record-icon" aria-hidden="true" />{c.stopping ? '記録を保存中…' : c.liveStatus.pending > 0 ? 'APIへ送信中…' : '計測を開始する'}</button>}
               <button className="button dark-secondary" disabled={s.count === 0 || c.recording || c.stopping} onClick={() => void c.exportCurrent()}>JSON出力</button>
             </div>
+            <p className="live-note">計測開始後、各サンプルの加速度・位置情報をAPIへ自動送信します。</p>
+            <p className="live-note" role="status">API送信済み {c.liveStatus.sent.toLocaleString()}件 · 送信待ち {c.liveStatus.pending.toLocaleString()}件{c.liveStatus.error && ` · 自動送信停止：${c.liveStatus.error} 計測終了後に未送信分を再送してください。`}</p>
             <p className="live-note">{c.wakeMessage}</p>
           </section>
         </div>
@@ -80,9 +82,9 @@ export function App() {
             {c.history.length === 0 ? <div className="empty-state"><span className="empty-icon" aria-hidden="true"><Signal /></span><strong>最初の計測をしてみよう</strong><p>終了した記録はここから<br />JSONで取り出せます。</p></div> : <ul className="history-list">{c.history.slice(0, 10).map(item => <HistoryItem key={item.id} session={item} onExport={() => void c.exportSaved(item)} disabled={busy} />)}</ul>}
             {c.history.length > 10 && <p className="helper">直近10件を表示しています。</p>}
             <button className="text-button" disabled={busy} onClick={() => void c.retrySave()}>保存を再試行・記録を更新</button>
-            <p className="helper local-note">記録は「APIへ送信」から送れます。ブラウザのデータ削除で記録も消えるため、必要な記録はJSONで保管してください。</p>
+            <p className="helper local-note">計測中にAPIへ自動送信します。未送信分は「APIへ送信」から再送できます。ブラウザのデータ削除で記録も消えるため、必要な記録はJSONで保管してください。</p>
           </section>
-          <UploadPanel history={c.history} disabled={busy} />
+          <UploadPanel history={c.history} disabled={busy || c.liveStatus.pending > 0} apiUrl={c.apiUrl} setApiUrl={c.setApiUrl} />
           <div className="field-tip"><span className="tip-number">FIELD TIP</span><p>バッグ内でスマホを固定。<br />同じ条件で、何度か走ってみよう。</p></div>
         </aside>
       </div>

@@ -1,12 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { getMeasurements, markUploaded, uploadedIds } from './storage';
-import { DEFAULT_API_URL, normalizeApiUrl, uploadMeasurements } from './upload';
+import { normalizeApiUrl, uploadMeasurements } from './upload';
 import type { Session } from './types';
 
-export function UploadPanel({ history, disabled }: { history: Session[]; disabled: boolean }) {
-  const [apiUrl, setApiUrl] = useState(() => {
-    try { return localStorage.getItem('collector-api-url') || DEFAULT_API_URL; } catch { return DEFAULT_API_URL; }
-  });
+export function UploadPanel({ history, disabled, apiUrl, setApiUrl }: { history: Session[]; disabled: boolean; apiUrl: string; setApiUrl: (value: string) => void }) {
   const [selectedId, setSelectedId] = useState('');
   const [sending, setSending] = useState(false);
   const [message, setMessage] = useState('計測終了後、送る記録を選択してください。');
@@ -15,7 +12,7 @@ export function UploadPanel({ history, disabled }: { history: Session[]; disable
   const mounted = useRef(true);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; controller.current?.abort(); }; }, []);
   useEffect(() => { if (disabled) controller.current?.abort(); }, [disabled]);
-  const available = history.filter(item => item.status !== 'recording' && item.sampleCount > 0);
+  const available = history.filter(item => item.sampleCount > 0);
   const selected = available.find(item => item.id === selectedId);
 
   async function send() {
@@ -46,7 +43,7 @@ export function UploadPanel({ history, disabled }: { history: Session[]; disable
 
   return <section className="panel upload-panel" aria-labelledby="upload-title">
     <div className="section-heading"><h2 id="upload-title">APIへ送信</h2><span className="mini-tag">POST</span></div>
-    <p className="helper">選択した記録の加速度・位置情報を担当BのAPIへ送信します。</p>
+    <p className="helper">計測開始と同時に、各サンプルの加速度・位置情報をこのAPIへ自動送信します。模擬モードでは架空の値を送ります。</p>
     <label className="upload-field">送信先API URL<input type="url" value={apiUrl} onChange={event => setApiUrl(event.target.value)} disabled={sending || disabled} placeholder="https://…/dev/measurements" autoCapitalize="none" spellCheck={false} /></label>
     <label className="upload-field">送る記録<select value={selectedId} onChange={event => { setSelectedId(event.target.value); setProgress(null); }} disabled={sending || disabled}>
       <option value="">記録を選択してください</option>
@@ -57,6 +54,6 @@ export function UploadPanel({ history, disabled }: { history: Session[]; disable
       {sending && <button className="button secondary" onClick={() => controller.current?.abort()}>送信を中止</button>}</div>
     {progress && <progress max={progress.total} value={progress.sent} aria-label="APIへの送信進捗" />}
     <p className="helper" role="status" aria-live="polite">{message}</p>
-    <p className="helper">同じURLへの再送では保存確認済みの計測を省略します。計測中は送信できません。</p>
+    <p className="helper">自動送信に失敗した記録は、計測・自動送信の終了後に再送できます。同じURLへの再送では保存確認済みの計測を省略します。</p>
   </section>;
 }

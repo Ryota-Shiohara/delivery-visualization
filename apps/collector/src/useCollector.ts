@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { amplitude, GPS_MAX_AGE_MS, makeMeasurement, MAX_SAMPLES, relativeTilt, SENSOR_MAX_AGE_MS } from './measurement';
 import { connectSensors, requestSensorPermissions } from './sensors';
-import { downloadSession, getMeasurements, listSessions, saveBatch } from './storage';
+import { downloadSession, getMeasurements, listSessions, markUploaded, saveBatch } from './storage';
+import { DEFAULT_API_URL, normalizeApiUrl } from './upload';
+import { LiveUpload, type LiveUploadStatus } from './liveUpload';
 import type { Measurement, Mode, Orientation, Position, Reading, Session } from './types';
 
 type Snapshot = { reading: Reading | null; tilt: number | null; position: Position | null; hz: number; count: number; elapsed: number; points: number[]; sensorFresh: boolean; orientationFresh: boolean };
@@ -20,6 +22,12 @@ export function useCollector() {
   const [storageMessage, setStorageMessage] = useState('計測データはこのブラウザに保存されます。');
   const [wakeMessage, setWakeMessage] = useState('計測開始時に画面の点灯維持を試みます。');
   const [history, setHistory] = useState<Session[]>([]);
+  const [apiUrl, setApiUrl] = useState(() => {
+    try { return localStorage.getItem('collector-api-url') || DEFAULT_API_URL; } catch { return DEFAULT_API_URL; }
+  });
+  const [liveStatus, setLiveStatus] = useState<LiveUploadStatus>({ sent: 0, pending: 0, error: null });
+  const liveUpload = useRef<LiveUpload | null>(null);
+  const livePending = useRef(0);
   const reading = useRef<Reading | null>(null);
   const orientation = useRef<{ value: Orientation; at: number } | null>(null);
   const baseline = useRef<Orientation | null>(null);
@@ -49,13 +57,19 @@ export function useCollector() {
     const count = samples.current.length;
     const current = { ...session.current, sampleCount: count };
     const batch = samples.current.slice(storedCount.current, count);
+    const uploader = liveUpload.current;
     const operation = saveBatch(current, batch).then(() => {
       storedCount.current = count;
+      uploader?.enqueue(batch);
       if (mounted.current) setStorageMessage(`${count.toLocaleString()}件を端末内に保存済み`);
     }).catch(error => {
       if (mounted.current) setStorageMessage('保存に失敗しました。停止後にJSONをダウンロードしてください。');
       throw error;
-    }).finally(() => { pendingSave.current = null; });
+    }).finally(() => {
+      pendingSave.current = null;
+      // 保存中に届いたサンプルも、タイマーを待たずに保存・送信する。
+      if (active.current && storedCount.current === count && samples.current.length > count) void flush().catch(() => {});
+    });
     pendingSave.current = operation;
     return operation;
   }
@@ -103,6 +117,7 @@ export function useCollector() {
       mounted.current = false;
       generation.current++;
       cleanup.current?.();
+      liveUpload.current?.close();
       clearInterval(uiTimer);
       clearInterval(saveTimer);
       document.removeEventListener('visibilitychange', onVisibility);
@@ -141,6 +156,7 @@ export function useCollector() {
           lastSampleAt.current = value.measuredAt;
           const tilt = orientation.current && value.measuredAt - orientation.current.at <= SENSOR_MAX_AGE_MS ? relativeTilt(orientation.current.value, baseline.current) : null;
           samples.current.push(makeMeasurement(session.current, value, tilt, position.current));
+          void flush().catch(() => {});
           if (samples.current.length >= MAX_SAMPLES) void stopRef.current('試作版の上限30,000件に達したため計測を終了しました。');
         },
         onOrientation: value => { orientation.current = { value, at: Date.now() }; },
@@ -175,6 +191,10 @@ export function useCollector() {
 
   async function start() {
     if (active.current || stopping || !enabled || !reading.current || Date.now() - reading.current.measuredAt > SENSOR_MAX_AGE_MS) return;
+    if (livePending.current > 0) { setMessage('前回のAPI送信が完了するまでお待ちください。'); return; }
+    let endpoint: string;
+    try { endpoint = normalizeApiUrl(apiUrl); }
+    catch (error) { setMessage(error instanceof Error ? error.message : 'API URLを確認してください。'); return; }
     if (session.current && storedCount.current < samples.current.length) {
       setMessage('前回の未保存データがあります。保存を再試行してください。保存できない場合はJSONを出力し、ファイルを確認してから再読み込みしてください。'); return;
     }
@@ -183,6 +203,14 @@ export function useCollector() {
       id: crypto.randomUUID(), deviceId: deviceId(), mode, startedAt: new Date().toISOString(), endedAt: null,
       calibration: baseline.current, sampleCount: 0, status: 'recording',
     };
+    const deliveryId = session.current.id;
+    liveUpload.current?.close();
+    setLiveStatus({ sent: 0, pending: 0, error: null });
+    try { localStorage.setItem('collector-api-url', endpoint); } catch { /* URLの保存は任意 */ }
+    liveUpload.current = new LiveUpload(endpoint, mode, id => markUploaded(deliveryId, endpoint, id), status => {
+      livePending.current = status.pending;
+      if (mounted.current) setLiveStatus(status);
+    });
     active.current = true; setRecording(true);
     setMessage('計測中です。画面を開いたままにしてください。');
     void flush().catch(() => {});
@@ -197,7 +225,7 @@ export function useCollector() {
     catch { setStorageMessage('保存済みデータの読み出しに失敗しました。'); }
   }
 
-  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, message, gpsMessage, storageMessage, wakeMessage, history, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
+  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, message, gpsMessage, storageMessage, wakeMessage, history, apiUrl, setApiUrl, liveStatus, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
 }
 
 function deviceId(): string {
