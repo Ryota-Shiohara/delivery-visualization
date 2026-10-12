@@ -1,6 +1,6 @@
 import type { Measurement, Mode } from './types';
 
-export const DEFAULT_API_URL = 'https://0cori0yr7d.execute-api.us-east-1.amazonaws.com/dev/measurements';
+export const DEFAULT_API_URL = import.meta.env.VITE_MEASUREMENT_API_URL || 'https://0cori0yr7d.execute-api.us-east-1.amazonaws.com/dev/measurements';
 export const UPLOAD_BATCH_SIZE = 30;
 
 export function normalizeApiUrl(value: string): string {

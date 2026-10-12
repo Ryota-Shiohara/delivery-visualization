@@ -3,6 +3,8 @@
 param(
     [Parameter(Mandatory = $true)]
     [string[]]$Arguments,
+    [ValidateSet('aws', 'sam')]
+    [string]$Executable = 'aws',
     [string]$EnvFile = (Join-Path (Split-Path $PSScriptRoot -Parent) '.env'),
     [string]$Region,
     [string]$Profile
@@ -52,7 +54,7 @@ if (-not $Profile) {
 if (-not $Region) {
     $Region = if ($settings.ContainsKey('AWS_REGION') -and $settings.AWS_REGION) { $settings.AWS_REGION } else { 'us-east-1' }
 }
-if (-not (Get-Command aws -ErrorAction SilentlyContinue)) { throw 'AWS CLI v2 is required.' }
+if (-not (Get-Command $Executable -ErrorAction SilentlyContinue)) { throw "$Executable is required." }
 
 # 認証情報はAWS CLIの実行中だけ環境変数へ設定し、成功・失敗どちらでも復元する。
 # npm/Viteには.envの認証情報を渡さない。
@@ -69,11 +71,13 @@ try {
         $value = if (-not $Profile -and $settings.ContainsKey($key)) { $settings[$key] } else { $null }
         [Environment]::SetEnvironmentVariable($key, $value, 'Process')
     }
-    $options = @('--region', $Region, '--no-cli-pager')
+    $options = @('--region', $Region)
+    if ($Executable -eq 'aws') { $options += '--no-cli-pager' }
     if ($Profile) { $options += @('--profile', $Profile) }
-    $output = & aws @Arguments @options
+    $output = & $Executable @Arguments @options
     if ($LASTEXITCODE -ne 0) {
-        throw "AWS CLI failed ($LASTEXITCODE). Check Lab credentials and permissions."
+        $label = if ($Executable -eq 'aws') { 'AWS CLI' } else { 'SAM CLI' }
+        throw "$label failed ($LASTEXITCODE). Check Lab credentials and permissions."
     }
     $output
 } finally {

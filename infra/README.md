@@ -1,6 +1,6 @@
 # AWS構成（担当B中心）
 
-collectorの静的配信はCloudFormationで管理します。それ以外のリソース定義は今後追加します。エージェントはAWSリソースの作成・デプロイを実行しません。
+collectorの静的配信、受信API、解析Lambdaと結果テーブル、参照APIとdashboardをCloudFormation/SAMで管理します。[全システムの構築手順](../docs/deployment/all-system.md)の `scripts/deploy-all.ps1` からまとめて呼び出せます。エージェントはAWSリソースの作成・デプロイを実行しません。
 
 | リソース | 役割 |
 | --- | --- |
@@ -123,4 +123,4 @@ DはS3のHTTPSオブジェクトURL、API Gateway HTTP API、参照Lambda、C形
 
 ## Dの構築自動化
 
-dashboard-storage.yamlとdashboard.yamlをscripts/deploy-dashboard.ps1から順に適用します。[Dの自動構築手順](../docs/deployment/d-dashboard-automated.md)を参照してください。Bのtemplate.yamlは変更せず、Cの解析Lambda・StreamsはC側の構築対象です。
+dashboard-storage.yamlとdashboard.yamlをscripts/deploy-dashboard.ps1から順に適用します。[Dの自動構築手順](../docs/deployment/d-dashboard-automated.md)を参照してください。全体の統合構築ではBのtemplate.yamlで計測テーブルのStreamsを有効化し、Cのanalysis.yamlで解析Lambda・Streams接続・結果テーブルを作ります。Dはその結果テーブルにexistingモードで接続します。

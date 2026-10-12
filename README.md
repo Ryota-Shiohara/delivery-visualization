@@ -65,3 +65,5 @@ Node.js 20以上で、依存パッケージのインストールやビルドな�
 `npm run test:d` でローカル/API検証15項目を実行します。`npm run package:d` はWindows上でアップロード用ZIPを `.local/artifacts/` に作成するだけで、AWS操作は行いません。
 
 DのAWS環境をコマンド1回で作成・更新する場合は [Dの構築自動化手順](docs/deployment/d-dashboard-automated.md) を参照してください。Cの既存テーブル接続と、仮テーブル3つ・共有サンプルの作成に対応します。
+
+collector・受信API・解析Lambda・参照API・dashboardをまとめて構築する手順は [全システムの構築・更新](docs/deployment/all-system.md) を参照してください。`scripts/deploy-all.ps1` がルートの `.env` を使用して担当間の接続情報を引き継ぎます。

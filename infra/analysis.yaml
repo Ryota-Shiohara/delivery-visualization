@@ -1,0 +1,63 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Measurement stream analysis Lambda and three result tables.
+Parameters:
+  MeasurementsStreamArn:
+    Type: String
+Resources:
+  AnalysisTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: measurementId, AttributeType: S}]
+      KeySchema: [{AttributeName: measurementId, KeyType: HASH}]
+  SummaryTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: deliveryId, AttributeType: S}]
+      KeySchema: [{AttributeName: deliveryId, KeyType: HASH}]
+  CellTable:
+    Type: AWS::DynamoDB::Table
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions: [{AttributeName: cellId, AttributeType: S}]
+      KeySchema: [{AttributeName: cellId, KeyType: HASH}]
+  AnalysisFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: python3.14
+      CodeUri: ../services/analysis/
+      Handler: analysis1.lambda_handler
+      Role: !Sub 'arn:${AWS::Partition}:iam::${AWS::AccountId}:role/LabRole'
+      MemorySize: 256
+      Timeout: 60
+      Environment:
+        Variables:
+          ANALYSIS_TABLE_NAME: !Ref AnalysisTable
+          DELIVERY_TABLE_NAME: !Ref SummaryTable
+          CELL_TABLE_NAME: !Ref CellTable
+      Events:
+        Measurements:
+          Type: DynamoDB
+          Properties:
+            Stream: !Ref MeasurementsStreamArn
+            StartingPosition: LATEST
+            BatchSize: 30
+            ParallelizationFactor: 1
+            FunctionResponseTypes: [ReportBatchItemFailures]
+Outputs:
+  AnalysisTableName:
+    Value: !Ref AnalysisTable
+  SummaryTableName:
+    Value: !Ref SummaryTable
+  CellTableName:
+    Value: !Ref CellTable
+  AnalysisFunctionName:
+    Value: !Ref AnalysisFunction

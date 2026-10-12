@@ -13,7 +13,7 @@ param(
     [int]$MaxTableItems = 5000,
     [string]$Profile,
     [string]$EnvFile,
-    [string]$Region = 'us-east-1',
+    [string]$Region,
     [ValidatePattern('^\d{12}$')]
     [string]$ExpectedAccountId,
     [string]$NodePath
@@ -43,6 +43,14 @@ if ($WhatIfPreference) {
     return
 }
 if (-not (Get-Command aws -ErrorAction SilentlyContinue)) { throw 'AWS CLI v2をインストールしてください。' }
+if (-not $Region) {
+    if ($Profile) { $Region = 'us-east-1' }
+    else {
+        $regionOptions = @{}
+        if ($EnvFile) { $regionOptions.EnvFile = $EnvFile }
+        $Region = & (Join-Path $PSScriptRoot 'read-deployment-region.ps1') @regionOptions
+    }
+}
 if (-not $NodePath) {
     $nodeCommand = Get-Command node -ErrorAction SilentlyContinue
     if ($nodeCommand) { $NodePath = $nodeCommand.Source }

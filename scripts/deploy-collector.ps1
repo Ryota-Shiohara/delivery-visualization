@@ -11,6 +11,7 @@ param(
     [string]$Profile,
     [string]$EnvFile,
     [string]$Region,
+    [string]$MeasurementApiUrl,
     [ValidatePattern('^\d{12}$')]
     [string]$ExpectedAccountId
 )
@@ -96,11 +97,17 @@ if (-not $PSCmdlet.ShouldProcess($destination, 'Build and deploy collector')) {
 }
 
 Push-Location $collectorPath
+$previousApiUrl = $env:VITE_MEASUREMENT_API_URL
 try {
+    if ($MeasurementApiUrl) {
+        if ($MeasurementApiUrl -notmatch '^https://[^\s]+$') { throw 'MeasurementApiUrl must be an HTTPS URL.' }
+        $env:VITE_MEASUREMENT_API_URL = $MeasurementApiUrl
+    }
     Invoke-Npm -Arguments @('ci')
     Invoke-Npm -Arguments @('test')
     Invoke-Npm -Arguments @('run', 'build')
 } finally {
+    $env:VITE_MEASUREMENT_API_URL = $previousApiUrl
     Pop-Location
 }
 if (-not (Test-Path -LiteralPath (Join-Path $distPath 'index.html') -PathType Leaf)) {
