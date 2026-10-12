@@ -2,10 +2,11 @@ import { UPLOAD_BATCH_SIZE, uploadMeasurements } from './upload';
 import type { Measurement, Mode } from './types';
 
 export type LiveUploadStatus = { sent: number; pending: number; error: string | null };
+const MAX_CONCURRENT_BATCHES = 5;
 
 export class LiveUpload {
   private queue: Measurement[] = [];
-  private active = false;
+  private active = 0;
   private inFlight = 0;
   private sent = 0;
   private error: string | null = null;
@@ -44,23 +45,24 @@ export class LiveUpload {
 
   private pump() {
     if (this.closed || this.error) return;
-    if (!this.active && this.queue.length && (this.queue.length >= UPLOAD_BATCH_SIZE || this.partialReady || this.finishing)) {
+    while (this.active < MAX_CONCURRENT_BATCHES && this.queue.length && (this.queue.length >= UPLOAD_BATCH_SIZE || this.partialReady || this.finishing)) {
       const batch = this.queue.splice(0, UPLOAD_BATCH_SIZE);
+      let remaining = batch.length;
       clearTimeout(this.timer); this.timer = undefined; this.partialReady = false;
-      this.active = true; this.inFlight = batch.length;
+      this.active++; this.inFlight += batch.length;
       void uploadMeasurements(this.endpoint, batch, this.mode, {
         signal: this.controller.signal, sentIds: new Set(),
         onSent: async id => {
           await this.onSent(id);
-          this.sent++; this.inFlight--; this.publish();
+          this.sent++; this.inFlight--; remaining--; this.publish();
         },
         onProgress: () => {},
       }).catch(error => {
-        this.error = error instanceof Error ? error.message : '送信に失敗しました。';
+        this.error ??= error instanceof Error ? error.message : '送信に失敗しました。';
         this.queue = [];
         clearTimeout(this.timer); this.timer = undefined;
       }).finally(() => {
-        this.active = false; this.inFlight = 0;
+        this.active--; this.inFlight -= remaining;
         this.pump(); this.publish();
       });
     }
