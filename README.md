@@ -2,7 +2,7 @@
 
 スマホで配送中の加速度・傾斜・位置を計測し、AWSに保存・解析して配送品質と路面評価をWebで可視化する、4人チーム用のモノレポです。
 
-元の[システム概要](フードデリバリー品質管理・路面評価マッピングシステム_概要.md)を設計の出発点とします。[collectorのブラウザ版プロトタイプ](apps/collector/README.md)は実装済みです。ダッシュボード、API、解析処理、AWSリソースはまだ実装されていません。
+元の[システム概要](フードデリバリー品質管理・路面評価マッピングシステム_概要.md)を設計の出発点とします。[collectorのブラウザ版プロトタイプ](apps/collector/README.md)は実装済みです。Dの[ダッシュボードと参照API](D担当_はじめに.md)も実装済みです。Dの個人アカウントではS3・HTTP API・Lambda・DynamoDBによる仮表示を確認しました。Cの解析処理と実測データでの全体統合は未確認です。各担当の状況は個別のREADMEを参照してください。
 
 ## システム構成図
 
@@ -52,3 +52,14 @@ delivery-visualization/
 実測位置情報や認証情報はGitに追加しません。push・デプロイ・worktree作成は禁止します。コミットは `feat: 計測データの受信処理を追加` のように日本語で記述します。
 
 授業資料の条件は[資料との照合記録](docs/course-requirements.md)を参照してください。2025年度の概要資料と2026年10月更新の手引書を区別して記録しています。
+
+## D担当の起動・AWS表示
+
+Node.js 20以上で、依存パッケージのインストールやビルドなしに動作します。Windowsでは `D担当_起動.cmd`、他の環境では `npm run dev:d` で起動し、http://127.0.0.1:4173 を開きます。
+
+- [D担当の操作・Cとの未確定事項](D担当_はじめに.md)
+- [AWS Academyで表示する手順](docs/deployment/d-dashboard-aws.md)
+- [暫定データ・参照API仕様](contracts/d-query-prototype.md)
+- [AWS仮環境の確認記録](docs/reports/d-aws-verification.md)
+
+`npm run test:d` でローカル/API検証15項目を実行します。`npm run package:d` はWindows上でアップロード用ZIPを `.local/artifacts/` に作成するだけで、AWS操作は行いません。

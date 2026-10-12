@@ -1,0 +1,11 @@
+[
+  {
+    "deliveryId": "sample-delivery-001",
+    "sampleCount": 100,
+    "impactCount": 3,
+    "avgScore": 92.5,
+    "maxVibration": 4.2,
+    "maxTilt": 12,
+    "updatedAt": "2026-10-05T01:00:00.000Z"
+  }
+]

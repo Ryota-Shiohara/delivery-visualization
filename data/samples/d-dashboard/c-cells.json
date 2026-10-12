@@ -1,0 +1,13 @@
+[
+  {
+    "cellId": "70000_278000",
+    "centerLat": 35,
+    "centerLon": 139,
+    "sampleCount": 12,
+    "avgVibration": 1.25,
+    "maxVibration": 3.8,
+    "impactCount": 2,
+    "evalStatus": "evaluated",
+    "updatedAt": "2026-10-05T01:00:00.000Z"
+  }
+]
