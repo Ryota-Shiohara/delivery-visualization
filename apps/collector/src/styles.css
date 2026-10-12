@@ -125,6 +125,21 @@ dt { font-size: 12px; color: var(--muted); } dd { margin: 0; font-size: 15px; fo
 .upload-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 .upload-actions .button { min-height: 44px; }
 .upload-panel progress { width: 100%; accent-color: var(--accent); }
+.threshold-controls { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; }
+.threshold-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.threshold-heading .small { min-height: 44px; }
+.threshold-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.threshold-stats > div { padding: 12px; border: 1px solid var(--border); border-radius: 8px; }
+.threshold-stats dt { font-size: 12px; }.threshold-stats dd { font-size: 20px; overflow-wrap: anywhere; }.threshold-stats dd small { font-size: 11px; }
+.threshold-chart { display: block; width: 100%; height: auto; background: #f5f6f2; border-radius: 8px; }
+.threshold-chart text { font-size: 11px; fill: var(--muted); }.threshold-grid { stroke: var(--border); }
+.vibration-line { stroke: var(--accent); stroke-width: 1.5; fill: none; }.vibration-point { fill: var(--accent); }
+.threshold-line { stroke: var(--danger); stroke-width: 1.5; stroke-dasharray: 6 4; }
+.threshold-error { color: var(--danger); }.threshold-empty { padding: 24px 12px; text-align: center; font-size: 13px; color: var(--muted); background: #f5f6f2; border-radius: 8px; }
+.threshold-comparison { border-top: 1px solid var(--border); margin-top: 20px; padding-top: 16px; }.threshold-comparison h3 { font-size: 14px; margin: 0; }
+.threshold-explanation { margin-top: 20px; font-size: 12px; color: var(--muted); }.threshold-explanation summary { cursor: pointer; min-height: 44px; padding: 12px 0; color: var(--accent); }.threshold-explanation p { margin-top: 8px; }
+.threshold-panel input:focus-visible, .threshold-panel select:focus-visible, .threshold-explanation summary:focus-visible { outline: 3px solid #b68c36; outline-offset: 3px; }
+@media (max-width: 540px) { .threshold-controls { grid-template-columns: 1fr; gap: 0; }.threshold-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }.threshold-panel .helper { font-size: 12px; }.threshold-chart text { font-size: 20px; } }
 .field-tip { border-left: 2px solid #b5c89b; padding: 0 16px; margin: 0 8px; }
 .tip-number { font-size: 10px; font-weight: 700; color: var(--accent); letter-spacing: .15em; }
 .field-tip p { font-size: 12px; color: var(--muted); margin-top: 5px; }

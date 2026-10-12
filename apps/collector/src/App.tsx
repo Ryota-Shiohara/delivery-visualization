@@ -1,6 +1,7 @@
 import { useCollector } from './useCollector';
 import type { Session } from './types';
 import { UploadPanel } from './UploadPanel';
+import { ThresholdPanel } from './ThresholdPanel';
 
 const decimal = (n: number | null | undefined, digits = 2) => n === null || n === undefined ? '—' : n.toFixed(digits);
 const duration = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
@@ -66,6 +67,7 @@ export function App() {
             <p className="live-note" role="status">API送信済み {c.liveStatus.sent.toLocaleString()}件 · 送信待ち {c.liveStatus.pending.toLocaleString()}件{c.liveStatus.error && ` · 自動送信停止：${c.liveStatus.error} 計測終了後に未送信分を再送してください。`}</p>
             <p className="live-note">{c.wakeMessage}</p>
           </section>
+          <ThresholdPanel current={c.inspection} history={c.history} recording={c.recording} />
         </div>
 
         <aside className="side-column">

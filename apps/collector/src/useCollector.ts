@@ -23,6 +23,7 @@ export function useCollector() {
   const [storageMessage, setStorageMessage] = useState('計測データはこのブラウザに保存されます。');
   const [wakeMessage, setWakeMessage] = useState('計測開始時に画面の点灯維持を試みます。');
   const [history, setHistory] = useState<Session[]>([]);
+  const [inspection, setInspection] = useState<{ session: Session | null; measurements: Measurement[] }>({ session: null, measurements: [] });
   const [apiUrl, setApiUrl] = useState(() => {
     try { return localStorage.getItem('collector-api-url') || DEFAULT_API_URL; } catch { return DEFAULT_API_URL; }
   });
@@ -91,6 +92,7 @@ export function useCollector() {
       await refreshHistory();
     } catch { /* 保存失敗時もメモリからJSONを出力できる */ }
     finally { liveUpload.current?.finish(); if (mounted.current) setStopping(false); }
+    if (mounted.current) setInspection({ session: session.current, measurements: samples.current.slice() });
   }
   stopRef.current = stop;
 
@@ -112,6 +114,10 @@ export function useCollector() {
       });
     }, 200);
     const saveTimer = setInterval(() => { if (active.current) void flush().catch(() => {}); }, 2000);
+    // 統計用の配列更新は1Hz。センサ取得・POSTの処理には参加しない。
+    const inspectionTimer = setInterval(() => {
+      if (active.current) setInspection({ session: session.current, measurements: samples.current.slice() });
+    }, 1000);
     const onVisibility = () => {
       if (document.visibilityState === 'hidden' && active.current) void stopRef.current('画面が非表示になったため計測を終了しました。続ける場合は新しい計測を開始してください。');
     };
@@ -124,6 +130,7 @@ export function useCollector() {
       liveUpload.current?.close();
       clearInterval(uiTimer);
       clearInterval(saveTimer);
+      clearInterval(inspectionTimer);
       document.removeEventListener('visibilitychange', onVisibility);
     };
   // センサ値・保存カーソルはrefsで管理し、購読はマウント中に一度だけ行う。
@@ -234,6 +241,7 @@ export function useCollector() {
       calibration: baseline.current, sampleCount: 0, status: 'recording',
     };
     const deliveryId = session.current.id;
+    setInspection({ session: session.current, measurements: [] });
     liveUpload.current?.close();
     setLiveStatus({ sent: 0, pending: 0, error: null });
     try { localStorage.setItem('collector-api-url', endpoint); } catch { /* URLの保存は任意 */ }
@@ -255,7 +263,7 @@ export function useCollector() {
     catch { setStorageMessage('保存済みデータの読み出しに失敗しました。'); }
   }
 
-  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, message, gpsMessage, gpsConnecting, enableGps, storageMessage, wakeMessage, history, apiUrl, setApiUrl, liveStatus, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
+  return { mode, enabled, connecting, recording, stopping, calibrated, snapshot, inspection, message, gpsMessage, gpsConnecting, enableGps, storageMessage, wakeMessage, history, apiUrl, setApiUrl, liveStatus, enable, changeMode, calibrate, start, stop, exportCurrent, exportSaved, retrySave: async () => { try { await flush(); await refreshHistory(); } catch { /* メッセージはflushで表示 */ } } };
 }
 
 function deviceId(): string {
