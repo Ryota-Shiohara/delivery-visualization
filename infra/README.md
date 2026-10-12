@@ -1,6 +1,6 @@
 # AWS構成（担当B中心）
 
-構成管理ツールを選定してからリソース定義を追加します。現時点ではAWSリソースの作成・デプロイは行いません。
+collectorの静的配信はCloudFormationで管理します。それ以外のリソース定義は今後追加します。エージェントはAWSリソースの作成・デプロイを実行しません。
 
 | リソース | 役割 |
 | --- | --- |
@@ -20,3 +20,66 @@ EC2は使用しません。解析が書き込む結果テーブルから同じ�
 2026年版手引書に合わせ、リージョンは `us-east-1` を設計の前提とします。AWS Academyでは新しいIAMロールを作成できないため、既存の `LabRole` の利用可否を確認します。構成管理ツールが新規IAMロールを自動作成する場合は、そのまま適用せず既存ロールを参照する構成を検討します。利用できる権限は実際のLabで確認が必要です。
 
 最終統合は代表者のアカウントを想定し、個別検証の設定値を引き継げるようにします。アカウントID・ロールARN・API URL・テーブル名はコードに固定せず、今後の設定ファイルまたは環境変数から渡します。パスワードや一時認証情報は共有しません。
+
+## collectorの配信基盤
+
+`collector.yaml` で以下をまとめて作成・更新します。
+
+- 非公開S3バケット（名前はCloudFormationが生成、ACL無効、SSE-S3暗号化）
+- CloudFront OAC（S3へのリクエストを常に署名）
+- CloudFrontキャッシュポリシー（Minimum TTLは0、HTMLの `no-cache` を尊重）
+- CloudFrontディストリビューション（HTTPSリダイレクト、`index.html`、標準のCloudFront証明書）
+- 上記ディストリビューションだけに読み取りを許可するS3バケットポリシー
+
+PriceClass_200を使います。独自ドメインや証明書、IAMユーザー・ロールは作成しません。バケットポリシーはIAMロールとは別のリソースです。APIや計測データのAWS送信はこのテンプレートに含まれません。
+
+既存の手動作成済みリソースを自動で取り込むものではありません。新規スタックでは別の配信先が作られます。画面のファイルは既存の `scripts/deploy-collector.ps1` でアップロードします。
+
+### AWS Academyでの準備
+
+Labを起動して、最新のAccess Key・Secret Key・Session Tokenをリポジトリ直下の `.env` に設定します。`.env.example` をコピーして編集する具体的な手順は [スクリプトのREADME](../scripts/README.md) を参照してください。AWS CLIは `.env` を自動で読まないため、以下では共通の `aws-with-env.ps1` を使います。
+
+CloudFormation、S3（バケット、暗号化、所有権、パブリックアクセスブロック、バケットポリシー）、CloudFront（ディストリビューション、OAC、キャッシュポリシー）の作成・取得・更新・削除権限が必要です。実際に許可される操作はLabによって異なります。このテンプレートだけで権限制限を回避することはできません。
+
+以下はあなたが実施するコマンドです。リポジトリのルートで実行します。
+
+```powershell
+# 認証先が授業用アカウントであることを確認する。
+.\scripts\aws-with-env.ps1 -Arguments @('sts', 'get-caller-identity')
+
+# テンプレートのAWS側の構文検証（リソースは作成しない）。
+.\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'validate-template', '--template-body', 'file://infra/collector.yaml')
+
+# 初回作成／同じスタックの更新。完了まで待機する。
+.\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'deploy', '--template-file', 'infra/collector.yaml', '--stack-name', 'delivery-collector', '--no-fail-on-empty-changeset')
+```
+
+ラッパーはAWS CLIが失敗すると例外で停止します。リージョンは `.env` の `AWS_REGION`（省略時は `us-east-1`）を使用し、ラッパーの `-Region` でも指定できます。通常は呼び出し元の権限で実行し、IAM作成用の `--capabilities` は不要です。授業で既存LabRoleをCloudFormation実行ロールとして使う指示がある場合のみ、deployのArguments配列に `'--role-arn', '<既存のロールARN>'` を追加します。その場合はCloudFormationが引き受けられる信頼ポリシーと `iam:PassRole` の許可が必要です。LabRoleを使えば必ず成功するとは限りません。
+
+### 出力を受け取ってcollectorを配信する
+
+```powershell
+$stackJson = .\scripts\aws-with-env.ps1 -Arguments @('cloudformation', 'describe-stacks', '--stack-name', 'delivery-collector', '--output', 'json')
+$stack = ($stackJson -join "`n") | ConvertFrom-Json
+$outputs = @{}
+foreach ($entry in $stack.Stacks[0].Outputs) {
+    $outputs[$entry.OutputKey] = $entry.OutputValue
+}
+
+# プレビュー。AWS通信やアップロードは行わない。
+.\scripts\deploy-collector.ps1 -BucketName $outputs.BucketName -DistributionId $outputs.DistributionId -WhatIf
+
+# 実際に配信する場合。アカウントIDは実際の12桁の値に置き換える。
+.\scripts\deploy-collector.ps1 -BucketName $outputs.BucketName -DistributionId $outputs.DistributionId -ExpectedAccountId '<12桁のアカウントID>'
+$outputs.CollectorUrl
+```
+
+基盤作成直後は空のバケットなので、ファイル配信が終わるまでURLから画面は開けません。以降、画面だけの変更では配信スクリプトのみ、基盤の変更ではYAMLを編集して同じスタック名でCloudFormationのdeployを再実行します。
+
+### 失敗時と削除時
+
+作成失敗時はCloudFormationの「イベント」で失敗したリソースと理由を確認します。認証期限切れならLabの3項目を更新し、`AccessDenied` なら授業用権限を確認します。初回作成が `ROLLBACK_COMPLETE` になったスタックは、そのまま更新できないため、残存リソースを確認して失敗スタックを削除してから再作成します。
+
+S3には `DeletionPolicy: Retain` と `UpdateReplacePolicy: Retain` を設定しています。スタックを削除・バケットを置換してもバケットとファイルは残り、課金対象になり得ます。CloudFront・OAC・キャッシュポリシー・バケットポリシーはスタック削除時に削除されます。不要になった保持バケットは、必要なファイルを取り出してから手動で空にして削除してください。保持バケットは同名スタックを再作成しても自動で取り込まれません。
+
+参照：[CloudFormation OAC](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cloudfront-originaccesscontrol.html)、[S3オリジン](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-cloudfront-distribution-origin.html)、[CloudFormation deploy](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/deploy.html)。
