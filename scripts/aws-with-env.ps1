@@ -74,12 +74,18 @@ try {
     $options = @('--region', $Region)
     if ($Executable -eq 'aws') { $options += '--no-cli-pager' }
     if ($Profile) { $options += @('--profile', $Profile) }
-    $output = & $Executable @Arguments @options
+    if ($Executable -eq 'sam') {
+        # SAMの進捗は終了まで溜めず、CloudFormationイベントもその場で表示する。
+        & $Executable @Arguments @options | Out-Host
+    } else {
+        # AWS CLIのJSONは呼び出し元で解析するため、ホスト出力に変換しない。
+        $output = & $Executable @Arguments @options
+    }
     if ($LASTEXITCODE -ne 0) {
         $label = if ($Executable -eq 'aws') { 'AWS CLI' } else { 'SAM CLI' }
         throw "$label failed ($LASTEXITCODE). Check Lab credentials and permissions."
     }
-    $output
+    if ($Executable -eq 'aws') { $output }
 } finally {
     [Environment]::SetEnvironmentVariable('AWS_CLI_FILE_ENCODING', $previousFileEncoding, 'Process')
     foreach ($key in $credentialKeys) {

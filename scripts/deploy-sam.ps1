@@ -21,4 +21,5 @@ if ($LASTEXITCODE -ne 0) { throw "SAM build failed ($LASTEXITCODE)." }
 $arguments = @('deploy', '--template-file', (Join-Path $buildDir 'template.yaml'), '--stack-name', $StackName,
     '--resolve-s3', '--no-confirm-changeset', '--no-fail-on-empty-changeset')
 if ($ParameterOverrides.Count) { $arguments += @('--parameter-overrides') + $ParameterOverrides }
+Write-Host "Deploying SAM stack: $StackName ($Region)"
 & (Join-Path $PSScriptRoot 'aws-with-env.ps1') -Executable sam -EnvFile $EnvFile -Region $Region -Arguments $arguments | Out-Host
