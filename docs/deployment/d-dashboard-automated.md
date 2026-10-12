@@ -56,7 +56,7 @@ analysis / summary / cellの3テーブルがオンデマンドで作成され、
   -CellTableName delivery-cellDB
 ```
 
-このモードは既存テーブルがACTIVEであることを確認して参照Lambdaへ名前を渡す。テーブル作成・項目登録・Cの解析LambdaやStreams設定の変更は行わない。データが0件でもAPIが正常なら構築を完了し、配送・区画の件数を表示する。Cの解析が結果を書き込むようになると、そのデータを画面から参照できる。仮取得はScanと最大30秒キャッシュを使う。
+このモードは既存テーブルがACTIVEであることを確認して参照Lambdaへ名前を渡す。テーブル作成・項目登録・Cの解析LambdaやStreams設定の変更は行わない。データが0件でもAPIが正常なら構築を完了し、配送・区画の件数を表示する。Cの解析が結果を書き込むようになると、そのデータを画面から参照できる。一覧・区画は1ページずつ取得し、詳細は配送IDで索引をQueryする。
 
 ## 終了時の確認
 
@@ -82,7 +82,7 @@ $dResult = .\scripts\deploy-dashboard.ps1 -TableMode prototype
 $dResult.DashboardUrl
 ```
 
-`-ExpectedAccountId <12桁のアカウントID>` を付けると、別のアカウントならAWSへの書き込み前に停止する。Node.jsがPATHにない場合は `-NodePath 'C:\Program Files\nodejs\node.exe'` を指定できる。`-Region` と `-MaxTableItems`（1〜5000）も指定可能。
+`-ExpectedAccountId <12桁のアカウントID>` を付けると、別のアカウントならAWSへの書き込み前に停止する。Node.jsがPATHにない場合は `-NodePath 'C:\Program Files\nodejs\node.exe'` を指定できる。`-Region` と `-MaxPageItems`（1〜1000、1回の取得件数）も指定可能。
 
 ## 失敗時・削除時
 
@@ -94,10 +94,14 @@ S3の2バケットと仮テーブル3つはRetainを指定している。スタ�
 
 ## この追加の検証範囲
 
-AWS CLIとHTTPSをモックした11シナリオで、2モード、再実行でのサンプル維持、空テーブル、アカウント違い、モード切替拒否、CloudFormation/CORS失敗時の停止を確認。実際のAWSアカウントへの新規デプロイは未実施。実行時に `cloudformation validate-template` と公開URL確認を行う。
+AWS CLIとHTTPSをモックした12シナリオで、2モード、再実行でのサンプル維持、空テーブル、アカウント違い、モード切替拒否、CloudFormation/CORS失敗時の停止を確認。実際のAWSアカウントへの新規デプロイは未実施。実行時に `cloudformation validate-template` と公開URL確認を行う。
 
 ```powershell
 .\scripts\tests\dashboard-deploy.test.ps1 -NodePath 'C:\Program Files\nodejs\node.exe'
 ```
 
 参照：[CloudFormation deployとパラメータJSON](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/deploy.html)、[Lambdaのコードとロール指定](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-lambda-function.html)、[HTTP API](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-apigatewayv2-api.html)、[HTTP API Stage](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-apigatewayv2-stage.html)。
+
+## 取得方式の更新と既存環境への反映
+
+既存の解析結果テーブルにはDeliveryTimeIndexが必要です。構築時に索引のキー・Projectionを確認し、CREATING/UPDATINGなら約10分までACTIVEを待ちます。[Cの索引追加とD更新の手順](d-query-index-upgrade.md)を参照してください。

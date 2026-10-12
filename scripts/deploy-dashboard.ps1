@@ -9,8 +9,10 @@ param(
     [string]$SummaryTableName,
     [string]$CellTableName,
     [switch]$SkipSampleData,
-    [ValidateRange(1, 5000)]
-    [int]$MaxTableItems = 5000,
+    [ValidateRange(1, 1000)]
+    [int]$MaxPageItems = 1000,
+    [ValidatePattern('^[A-Za-z0-9_.-]{3,255}$')]
+    [string]$AnalysisIndexName = 'DeliveryTimeIndex',
     [string]$Profile,
     [string]$EnvFile,
     [string]$Region,
@@ -81,6 +83,26 @@ function Read-StackOutputs {
     foreach ($entry in $result.Stacks[0].Outputs) { $values[$entry.OutputKey] = $entry.OutputValue }
     return $values
 }
+function Wait-AnalysisIndex {
+    param([string]$TableName)
+    for ($attempt = 1; $attempt -le 120; $attempt++) {
+        $description = Read-AwsJson -Arguments @('dynamodb', 'describe-table', '--table-name', $TableName)
+        $indexes = if ($description.Table.PSObject.Properties['GlobalSecondaryIndexes']) { @($description.Table.GlobalSecondaryIndexes) } else { @() }
+        $index = @($indexes | Where-Object { $_.IndexName -eq $AnalysisIndexName })
+        if ($index.Count -ne 1) { throw "解析結果テーブルに${AnalysisIndexName}が必要です。Cのinfra/analysis.yamlを先に更新してください。" }
+        if ($index[0].IndexStatus -eq 'ACTIVE') {
+            $keys = @($index[0].KeySchema)
+            if (@($keys | Where-Object { $_.AttributeName -eq 'deliveryId' -and $_.KeyType -eq 'HASH' }).Count -ne 1 -or @($keys | Where-Object { $_.AttributeName -eq 'measuredAt' -and $_.KeyType -eq 'RANGE' }).Count -ne 1 -or $index[0].Projection.ProjectionType -ne 'ALL') {
+                throw '索引のキーはdeliveryId/measuredAt、ProjectionはALLにしてください。'
+            }
+            return
+        }
+        if ($index[0].IndexStatus -notin @('CREATING', 'UPDATING')) { throw '索引が利用できる状態ではありません。' }
+        if ($attempt -eq 120) { throw '索引の準備待ちがタイムアウトしました。ACTIVEになってから再実行してください。' }
+        if ($attempt -eq 1) { Write-Host "$AnalysisIndexName の作成完了を待っています。" }
+        Start-Sleep -Seconds 5
+    }
+}
 $identity = Read-AwsJson -Arguments @('sts', 'get-caller-identity')
 if ($ExpectedAccountId -and $identity.Account -ne $ExpectedAccountId) { throw "AWSアカウントが一致しません。Expected=$ExpectedAccountId Actual=$($identity.Account)" }
 Write-Host "AWS account: $($identity.Account), region: $Region, table mode: $TableMode"
@@ -100,6 +122,7 @@ if ($TableMode -eq 'existing') {
         $table = Read-AwsJson -Arguments @('dynamodb', 'describe-table', '--table-name', $name)
         if ($table.Table.TableStatus -ne 'ACTIVE') { throw "$name がACTIVEではありません。" }
     }
+    Wait-AnalysisIndex -TableName $AnalysisTableName
 }
 if (-not $PSCmdlet.ShouldProcess("$($identity.Account)/$Region/$StackName", 'Create/update D resources and publish dashboard')) { return }
 # パッケージ作成で失敗したらAWSへの書き込みを開始しない。
@@ -123,13 +146,14 @@ try {
         DashboardBucketName = $storage.DashboardBucketName; ArtifactBucketName = $storage.ArtifactBucketName
         LambdaCodeKey = $codeKey; TableMode = $TableMode
         AnalysisTableName = [string]$AnalysisTableName; SummaryTableName = [string]$SummaryTableName; CellTableName = [string]$CellTableName
-        MaxTableItems = [string]$MaxTableItems
+        MaxPageItems = [string]$MaxPageItems; AnalysisIndexName = $AnalysisIndexName
     }
     $parameterList = @($parameters.GetEnumerator() | Sort-Object Name | ForEach-Object { @{ ParameterKey = $_.Key; ParameterValue = $_.Value } })
     $parameterFile = Join-Path $workRoot 'parameters.json'
     Write-Utf8File -Path $parameterFile -Content (ConvertTo-Json -InputObject $parameterList -Depth 5)
     Invoke-DashboardAws -Arguments @('cloudformation', 'deploy', '--template-file', (Join-Path $repoRoot 'infra\dashboard.yaml'), '--stack-name', $backendStack, '--parameter-overrides', "file://$parameterFile", '--no-fail-on-empty-changeset') | Out-Host
     $backend = Read-StackOutputs -Name $backendStack
+    if ($TableMode -eq 'prototype') { Wait-AnalysisIndex -TableName $backend.AnalysisTableName }
     if ($TableMode -eq 'prototype' -and -not $SkipSampleData) {
         foreach ($sample in @(
             @{ Name = 'analysis'; Table = $backend.AnalysisTableName; Key = 'measurementId' },

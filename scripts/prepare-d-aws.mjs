@@ -7,7 +7,7 @@ const stage=path.join(root,'.local/aws-build'),lambda=path.join(stage,'lambda'),
 if(path.resolve(stage)!==path.resolve(root,'.local','aws-build'))throw new Error('Unexpected staging path');
 await rm(stage,{recursive:true,force:true});
 await mkdir(lambda,{recursive:true});await mkdir(web,{recursive:true});
-for(const name of ['index.mjs','aws-handler-core.mjs','local-contract.mjs'])await copyFile(path.join(root,'services/query',name),path.join(lambda,name));
+for(const name of ['index.mjs','aws-handler-core.mjs','local-contract.mjs','pagination.mjs','dynamo-reader.mjs'])await copyFile(path.join(root,'services/query',name),path.join(lambda,name));
 for(const name of ['demo.json','c-shared-example.json'])await copyFile(path.join(root,'data/samples/d-dashboard',name),path.join(lambda,name));
 for(const name of ['index.html','app.js','styles.css','config.js'])await copyFile(path.join(root,'apps/dashboard',name),path.join(web,name));
 await cp(path.join(root,'apps/dashboard/vendor'),path.join(web,'vendor'),{recursive:true});

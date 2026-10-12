@@ -8,3 +8,5 @@
 - S3のHTTPSオブジェクトURLからの直接配信を採用。閲覧制限・公開範囲は `infra/` と連携する。
 
 ローカル仮環境を実装済み。リポジトリ直下の `D担当_はじめに.md` を参照してください。Node.js標準HTTPサーバーと、ローカル保存したLeafletを使います。Cの共有例・架空デモ・JSON取り込みに対応します。AWS用の設定は `config.js` の `apiBaseUrl` と `deployment: "aws"` に指定します。S3配信とDynamoDBの共有例による仮表示を確認済みです。[AWS手順](../../docs/deployment/d-dashboard-aws.md)を参照してください。
+
+配送単位のQuery・ページ取得・UI整理とCの索引追加は [既存環境の更新手順](../../docs/deployment/d-query-index-upgrade.md) を参照してください。

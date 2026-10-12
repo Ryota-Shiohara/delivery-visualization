@@ -91,3 +91,5 @@ CloudFormationなどのAWS CLIコマンドも同じ `.env` を使うには、`aw
 ## DのAWS構築スクリプト
 
 deploy-dashboard.ps1はDのS3配信・HTTP API・参照Lambdaを構築して画面を公開します。既存のCテーブル接続または仮テーブル作成を選べます。認証はaws-with-env.ps1を共用します。[実行手順](../docs/deployment/d-dashboard-automated.md)とscripts/tests/dashboard-deploy.test.ps1を参照。WhatIf指定時はAWS通信・ローカル生成を行いません。
+
+配送単位のQuery・ページ取得・UI整理とCの索引追加は [既存環境の更新手順](../docs/deployment/d-query-index-upgrade.md) を参照してください。
