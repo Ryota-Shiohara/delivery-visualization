@@ -114,3 +114,9 @@ $outputs.CollectorUrl
 S3には `DeletionPolicy: Retain` と `UpdateReplacePolicy: Retain` を設定しています。スタックを削除・バケットを置換してもバケットとファイルは残り、課金対象になり得ます。CloudFront・OAC・キャッシュポリシー・バケットポリシーはスタック削除時に削除されます。不要になった保持バケットは、必要なファイルを取り出してから手動で空にして削除してください。保持バケットは同名スタックを再作成しても自動で取り込まれません。
 
 参照：[CloudFormation OAC](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-cloudfront-originaccesscontrol.html)、[S3オリジン](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-properties-cloudfront-distribution-origin.html)、[CloudFormation deploy](https://docs.aws.amazon.com/cli/latest/reference/cloudformation/deploy.html)。
+
+## D担当の仮表示環境
+
+DはS3のHTTPSオブジェクトURL、API Gateway HTTP API、参照Lambda、C形式の3種類のDynamoDB仮テーブルを使用する。[コンソールでの構築手順](../docs/deployment/d-dashboard-aws.md)と[確認記録](../docs/reports/d-aws-verification.md)を参照。Bの計測受信REST APIとは別のAPIであり、既存のtemplate.yamlをこのHTTP APIで置き換えない。
+
+`examples/d-dashboard/` は公開読み取りポリシー・Lambdaテストイベント・DynamoDB項目の設定例。バケット名は自分の値へ変更し、公開対象を画面専用dashboard/以下に限定する。実測位置情報・認証情報は含めない。Dのリソースは現在手動構築で、共有アカウントでの構成管理とテーブル設計はB/Cと合意する。

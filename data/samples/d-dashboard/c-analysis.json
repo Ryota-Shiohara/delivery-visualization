@@ -1,0 +1,16 @@
+[
+  {
+    "measurementId": "sample-measurement-0001",
+    "deliveryId": "sample-delivery-001",
+    "measuredAt": "2026-10-05T00:00:00.000Z",
+    "qualityScore": 95,
+    "vibration": 0,
+    "isImpact": false,
+    "tiltDegrees": 2.5,
+    "latitude": 35,
+    "longitude": 139,
+    "accuracyMeters": 5,
+    "speedMetersPerSecond": 3,
+    "algorithmVersion": "prototype-0.3"
+  }
+]

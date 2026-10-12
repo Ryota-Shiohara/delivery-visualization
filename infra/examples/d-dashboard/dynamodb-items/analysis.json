@@ -1,0 +1,38 @@
+{
+  "measurementId": {
+    "S": "sample-measurement-0001"
+  },
+  "deliveryId": {
+    "S": "sample-delivery-001"
+  },
+  "measuredAt": {
+    "S": "2026-10-05T00:00:00.000Z"
+  },
+  "qualityScore": {
+    "N": "95"
+  },
+  "vibration": {
+    "N": "0"
+  },
+  "isImpact": {
+    "BOOL": false
+  },
+  "tiltDegrees": {
+    "N": "2.5"
+  },
+  "latitude": {
+    "N": "35"
+  },
+  "longitude": {
+    "N": "139"
+  },
+  "accuracyMeters": {
+    "N": "5"
+  },
+  "speedMetersPerSecond": {
+    "N": "3"
+  },
+  "algorithmVersion": {
+    "S": "prototype-0.3"
+  }
+}

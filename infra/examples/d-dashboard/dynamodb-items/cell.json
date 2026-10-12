@@ -1,0 +1,29 @@
+{
+  "cellId": {
+    "S": "70000_278000"
+  },
+  "centerLat": {
+    "N": "35"
+  },
+  "centerLon": {
+    "N": "139"
+  },
+  "sampleCount": {
+    "N": "12"
+  },
+  "avgVibration": {
+    "N": "1.25"
+  },
+  "maxVibration": {
+    "N": "3.8"
+  },
+  "impactCount": {
+    "N": "2"
+  },
+  "evalStatus": {
+    "S": "evaluated"
+  },
+  "updatedAt": {
+    "S": "2026-10-05T01:00:00.000Z"
+  }
+}
