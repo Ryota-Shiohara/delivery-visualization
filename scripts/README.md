@@ -87,3 +87,7 @@ CloudFormationなどのAWS CLIコマンドも同じ `.env` を使うには、`aw
 - `node scripts/create-d-samples.mjs`：架空デモとC共有例を再生成。
 
 [利用手順](../D担当_はじめに.md)と[AWS構築手順](../docs/deployment/d-dashboard-aws.md)を参照。Dの画面はcollectorのビルドや依存パッケージと独立している。
+
+## DのAWS構築スクリプト
+
+deploy-dashboard.ps1はDのS3配信・HTTP API・参照Lambdaを構築して画面を公開します。既存のCテーブル接続または仮テーブル作成を選べます。認証はaws-with-env.ps1を共用します。[実行手順](../docs/deployment/d-dashboard-automated.md)とscripts/tests/dashboard-deploy.test.ps1を参照。WhatIf指定時はAWS通信・ローカル生成を行いません。

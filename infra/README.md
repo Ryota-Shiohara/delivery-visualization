@@ -119,4 +119,8 @@ S3には `DeletionPolicy: Retain` と `UpdateReplacePolicy: Retain` を設定し
 
 DはS3のHTTPSオブジェクトURL、API Gateway HTTP API、参照Lambda、C形式の3種類のDynamoDB仮テーブルを使用する。[コンソールでの構築手順](../docs/deployment/d-dashboard-aws.md)と[確認記録](../docs/reports/d-aws-verification.md)を参照。Bの計測受信REST APIとは別のAPIであり、既存のtemplate.yamlをこのHTTP APIで置き換えない。
 
-`examples/d-dashboard/` は公開読み取りポリシー・Lambdaテストイベント・DynamoDB項目の設定例。バケット名は自分の値へ変更し、公開対象を画面専用dashboard/以下に限定する。実測位置情報・認証情報は含めない。Dのリソースは現在手動構築で、共有アカウントでの構成管理とテーブル設計はB/Cと合意する。
+`examples/d-dashboard/` は公開読み取りポリシー・Lambdaテストイベント・DynamoDB項目の設定例。バケット名は自分の値へ変更し、公開対象を画面専用dashboard/以下に限定する。実測位置情報・認証情報は含めない。手動構築済みの仮環境の記録に加え、D用の自動構築ファイルを用意した。共有アカウントのテーブル設計はB/Cと合意する。
+
+## Dの構築自動化
+
+dashboard-storage.yamlとdashboard.yamlをscripts/deploy-dashboard.ps1から順に適用します。[Dの自動構築手順](../docs/deployment/d-dashboard-automated.md)を参照してください。Bのtemplate.yamlは変更せず、Cの解析Lambda・StreamsはC側の構築対象です。
