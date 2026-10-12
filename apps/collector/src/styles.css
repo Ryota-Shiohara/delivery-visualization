@@ -120,6 +120,11 @@ dt { font-size: 12px; color: var(--muted); } dd { margin: 0; font-size: 15px; fo
 .small { border-color: var(--border); font-size: 11px; padding: 8px 12px; background: #fff; }
 .text-button { background: transparent; color: var(--accent); border: 0; font-size: 12px; padding: 10px 0; min-height: 44px; text-decoration: underline; text-underline-offset: 4px; }
 .local-note { padding-top: 14px; border-top: 1px solid var(--border); }
+.upload-field { display: grid; gap: 6px; margin-top: 16px; font-size: 13px; }
+.upload-field input, .upload-field select { width: 100%; min-width: 0; min-height: 44px; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font: inherit; font-size: 16px; background: white; color: var(--dark); }
+.upload-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
+.upload-actions .button { min-height: 44px; }
+.upload-panel progress { width: 100%; accent-color: var(--accent); }
 .field-tip { border-left: 2px solid #b5c89b; padding: 0 16px; margin: 0 8px; }
 .tip-number { font-size: 10px; font-weight: 700; color: var(--accent); letter-spacing: .15em; }
 .field-tip p { font-size: 12px; color: var(--muted); margin-top: 5px; }

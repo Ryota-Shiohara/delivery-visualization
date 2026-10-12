@@ -1,27 +1,34 @@
 import json
+import os
 import boto3
 from decimal import Decimal
 
 dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table("delivery-testDB")
+table = dynamodb.Table(os.environ.get("TABLE_NAME", "delivery-testDB"))
 
 
 def lambda_handler(event, context):
-    print("event:", event)
+    # 計測値・位置情報をログに出さず、応答にCORSヘッダーを付ける。
+    try:
+        body = json.loads(event.get("body") or "", parse_float=Decimal)
+    except (ValueError, TypeError):
+        return response(400, {"message": "invalid JSON"})
+    if not isinstance(body, dict) or not isinstance(body.get("measurementId"), str) or not body["measurementId"].strip():
+        return response(400, {"message": "measurementId is required"})
+    try:
+        # 再送では同じmeasurementIdの項目を上書きし、重複項目を作らない。
+        table.put_item(Item=body)
+    except Exception:
+        return response(500, {"message": "save failed"})
+    return response(200, {"message": "saved", "measurementId": body["measurementId"]})
 
-    # API Gatewayから送られてきたPOST本文をJSONに戻す
-    body = json.loads(event["body"], parse_float=Decimal)
 
-    # DynamoDBへ保存
-    table.put_item(Item=body)
-
+def response(status, body):
     return {
-        "statusCode": 200,
+        "statusCode": status,
         "headers": {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": os.environ.get("CORS_ORIGIN", "*"),
         },
-        "body": json.dumps({
-            "message": "saved",
-            "measurementId": body["measurementId"]
-        })
+        "body": json.dumps(body),
     }

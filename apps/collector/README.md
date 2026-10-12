@@ -57,7 +57,25 @@ npm run preview
 
 欠測値、傾斜の角度、GPSの鮮度、共通Schema、重複保存、権限要求の順序をテストします。センサ精度・権限・取得頻度・電池消費は別途スマホで確認してください。
 
-`dist/` は将来のS3＋CloudFront配信を想定した静的ファイルです。AWSへの送信・認証・デプロイは未実装です。
+`dist/` はS3またはS3＋CloudFrontで配信する静的ファイルです。配信手順は [infra/README.md](../../infra/README.md) を参照してください。
+
+## 担当BのAPIへPOSTする
+
+計測を終了して端末内に保存したら、「APIへ送信」に担当Bから受け取った完全なHTTPS URL（例：`https://<API ID>.execute-api.us-east-1.amazonaws.com/dev/measurements`）を入力し、記録を選んで「選択した記録を送信」を押します。URLはブラウザに保存します。API URLは `delivery-visualization-b` スタックの `MeasurementApiUrl` 出力から確認できます。
+
+現在の初期URLは `https://0cori0yr7d.execute-api.us-east-1.amazonaws.com/dev/measurements` です。以前に送信先を保存したブラウザでは保存済みURLを優先します。画面でURLを確認・変更してから送信してください。
+
+現在の担当BのAPIは1件ずつのPOSTです。JSON出力ファイル全体や配列ではなく、各 `Measurement` を本文にし、追加の `mode: 'device' | 'demo'` で実機と模擬を識別します。AWS認証情報はブラウザへ渡しません。認証付きAPIに変更する場合は別途認証方式への対応が必要です。
+
+送信中は件数・進捗を表示し、中止できます。HTTPエラー・通信エラー・15秒のタイムアウト・APIの保存確認不一致があれば停止します。APIの `{ message: 'saved', measurementId }` 応答を確認した計測IDをIndexedDBに保存するため、同じAPI URLへの再送では確認済みの分を省略します。応答を受け取れなかった場合は再送しますが、担当BのDynamoDBでは同じIDを上書きします。送信後も端末内の記録は残ります。URLを変えると別の送信先として扱います。
+
+最大30,000件は最大30,000回のリクエストになります。まず短い模擬計測で確認してください。計測中は送信せず、送信中に新しい計測を始めた場合は送信を中止します。画面を閉じると送信は中止され、保存確認済みの分から再送できます。
+
+### ブラウザから送信するための担当B側の変更
+
+`infra/template.yaml` にOPTIONSのCORS応答、`services/ingestion/lambda_B.py` にPOST応答のCORSヘッダーを追加しています。ブラウザからは両方が必要です。担当BのAPIへこれらの変更を反映してから確認してください。collectorだけを再配信しても、既存APIのCORS設定は更新されません。
+
+SAMの `CollectorOrigin` パラメーターは既定で `*` です。配信先を限定する場合は `https://<バケット名>.s3.us-east-1.amazonaws.com` を指定します。`/site/index.html` は含めません。CORSは認証の代わりにはなりません。
 
 ## ソースの責務
 
@@ -68,3 +86,4 @@ npm run preview
 | `src/measurement.ts` | 計測整形・傾斜・GPS鮮度 |
 | `src/storage.ts` | IndexedDB・JSON出力 |
 | `src/useCollector.ts` | 計測状態・定期保存・点灯維持 |
+| `src/UploadPanel.tsx`・`upload.ts` | API送信画面・1件ずつのPOST・進捗・中止 |

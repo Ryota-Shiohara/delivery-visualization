@@ -6,10 +6,14 @@ let database: Promise<IDBDatabase> | undefined;
 function openDatabase(): Promise<IDBDatabase> {
   if (!database) {
     database = new Promise<IDBDatabase>((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, 1);
+      const request = indexedDB.open(DB_NAME, 2);
       request.onupgradeneeded = () => {
-        request.result.createObjectStore('sessions', { keyPath: 'id' });
-        request.result.createObjectStore('measurements', { keyPath: 'measurementId' })
+        if (!request.result.objectStoreNames.contains('sessions')) {
+          request.result.createObjectStore('sessions', { keyPath: 'id' });
+          request.result.createObjectStore('measurements', { keyPath: 'measurementId' })
+            .createIndex('deliveryId', 'deliveryId');
+        }
+        request.result.createObjectStore('uploads', { keyPath: ['endpoint', 'measurementId'] })
           .createIndex('deliveryId', 'deliveryId');
       };
       request.onsuccess = () => resolve(request.result);
@@ -18,6 +22,27 @@ function openDatabase(): Promise<IDBDatabase> {
     }).catch(error => { database = undefined; throw error; });
   }
   return database;
+}
+
+export async function uploadedIds(deliveryId: string, endpoint: string): Promise<Set<string>> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const request = db.transaction('uploads').objectStore('uploads').index('deliveryId').getAll(deliveryId);
+    request.onsuccess = () => resolve(new Set((request.result as { endpoint: string; measurementId: string }[])
+      .filter(item => item.endpoint === endpoint).map(item => item.measurementId)));
+    request.onerror = () => reject(request.error);
+  });
+}
+
+export async function markUploaded(deliveryId: string, endpoint: string, measurementId: string): Promise<void> {
+  const db = await openDatabase();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('uploads', 'readwrite');
+    tx.objectStore('uploads').put({ deliveryId, endpoint, measurementId });
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error ?? new Error('送信状態の保存に失敗しました。'));
+  });
 }
 
 export async function saveBatch(session: Session, measurements: Measurement[]): Promise<void> {

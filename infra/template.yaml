@@ -1,6 +1,12 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
+Parameters:
+  CollectorOrigin:
+    Type: String
+    Default: '*'
+    Description: Allowed collector origin, such as https://bucket.s3.us-east-1.amazonaws.com (no path).
+
 Resources:
 
   MeasurementsTable:
@@ -20,6 +26,10 @@ Resources:
     Properties:
       Name: deliveryMeasurementAPI
       StageName: dev
+      Cors:
+        AllowOrigin: !Sub "'${CollectorOrigin}'"
+        AllowMethods: "'POST,OPTIONS'"
+        AllowHeaders: "'Content-Type'"
 
   SaveMeasurementFunction:
     Type: AWS::Serverless::Function
@@ -35,6 +45,7 @@ Resources:
       Environment:
         Variables:
           TABLE_NAME: !Ref MeasurementsTable
+          CORS_ORIGIN: !Ref CollectorOrigin
 
       Events:
         PostMeasurement:

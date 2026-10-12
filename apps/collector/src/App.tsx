@@ -1,5 +1,6 @@
 import { useCollector } from './useCollector';
 import type { Session } from './types';
+import { UploadPanel } from './UploadPanel';
 
 const decimal = (n: number | null | undefined, digits = 2) => n === null || n === undefined ? '—' : n.toFixed(digits);
 const duration = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, '0')}:${Math.floor(seconds % 60).toString().padStart(2, '0')}`;
@@ -79,8 +80,9 @@ export function App() {
             {c.history.length === 0 ? <div className="empty-state"><span className="empty-icon" aria-hidden="true"><Signal /></span><strong>最初の計測をしてみよう</strong><p>終了した記録はここから<br />JSONで取り出せます。</p></div> : <ul className="history-list">{c.history.slice(0, 10).map(item => <HistoryItem key={item.id} session={item} onExport={() => void c.exportSaved(item)} disabled={busy} />)}</ul>}
             {c.history.length > 10 && <p className="helper">直近10件を表示しています。</p>}
             <button className="text-button" disabled={busy} onClick={() => void c.retrySave()}>保存を再試行・記録を更新</button>
-            <p className="helper local-note">AWSへの送信は未実装です。ブラウザのデータ削除で記録も消えるため、必要な記録はJSONで保管してください。</p>
+            <p className="helper local-note">記録は「APIへ送信」から送れます。ブラウザのデータ削除で記録も消えるため、必要な記録はJSONで保管してください。</p>
           </section>
+          <UploadPanel history={c.history} disabled={busy} />
           <div className="field-tip"><span className="tip-number">FIELD TIP</span><p>バッグ内でスマホを固定。<br />同じ条件で、何度か走ってみよう。</p></div>
         </aside>
       </div>
