@@ -10,7 +10,7 @@ const datetime=v=>v&&Number.isFinite(Date.parse(v))?new Intl.DateTimeFormat('ja-
 const set=(id,text)=>{$(id).textContent=text;};
 function toast(text){set('toast',text);$('toast').hidden=false;clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('toast').hidden=true,4200);}
 function alert(message){set('alert',message);$('alert').hidden=!message;}
-async function request(path,options){const res=await fetch(`${base}${path}`,options);const data=await res.json();if(!res.ok)throw new Error(data.error??`APIエラー (${res.status})`);return data;}
+async function request(path,options){const res=await fetch(`${base}${path}`,{cache:'no-store',signal:AbortSignal.timeout(15000),...options});const data=await res.json();if(!res.ok)throw Object.assign(new Error(data.error??`APIエラー (${res.status})`),{status:res.status});return data;}
 const post=(path,payload)=>request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
 function modeLabel(){
  const sources=Object.values(state.meta?.sources??{});
@@ -52,12 +52,14 @@ function renderList(){
 async function loadDelivery(id){
  const token=++state.loadToken;
  if(!id){state.detail=null;renderDetail();return;}
- state.detail=null;state.detailBusy=false;renderDetail();
- const detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500`);
- if(token!==state.loadToken)return;
- state.detail=detail;state.page=0;renderDetail();
+ state.detail=null;state.detailBusy=true;renderDetail();
+ try{
+  const detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500`);
+  if(token!==state.loadToken)return;
+  state.detail=detail;state.page=0;
+ }finally{if(token===state.loadToken){state.detailBusy=false;renderDetail();}}
 }
-function renderDetail(){
+function renderDetail(preserveMap=false){
  const detail=state.detail,summary=detail?.summary,rows=detail?.measurements??[];
  set('selected-delivery',detail?.deliveryId??state.selectedId??'配送データがありません');
  set('delivery-subtitle',rows.length?`${datetime(rows[0].measuredAt)} – ${time(rows.at(-1).measuredAt)} JST / ${number(rows.length,0)}件を取得`:state.selectedId?'計測データを読み込み中、または未取得です。':'左の配送一覧から選択してください。');
@@ -72,7 +74,7 @@ function renderDetail(){
  let note=detail?`集計${number(total,0)}件 / 計測${rows.length}件を読み込み済み。グラフ・軌跡は読み込み済みの範囲を表示します。`:'配送を選択してください。';
  set('loaded-info',`計測${rows.length}件を読み込み済み${detail?.nextToken?'・続きがあります':''}`);$('more-measurements').hidden=!detail?.nextToken;$('more-measurements').disabled=state.detailBusy;
  if(modeLabel()==='取り込み＋架空データ')note+=' 取り込みデータと架空サンプルが混在しています。';
- set('coverage-note',note);renderChart('vibration-chart',rows,'vibration','#348e74');renderChart('tilt-chart',rows,'tiltDegrees','#7897a3');renderRecords();renderMap();
+ set('coverage-note',note);renderChart('vibration-chart',rows,'vibration','#348e74');renderChart('tilt-chart',rows,'tiltDegrees','#7897a3');renderRecords();renderMap(preserveMap);
 }
 function renderChart(id,rows,key,color){
  const area=$(id);area.replaceChildren();if(!rows.length||!rows.some(row=>finite(row[key]))){area.innerHTML='<div class="empty-state">表示できる計測がありません。</div>';return;}
@@ -106,7 +108,7 @@ function initializeMap(){
   }else{tiles?.remove();grid.addTo(map);set('map-note','座標プレビュー：背景地図なしでも操作できます。区画は中心点で表示します。');}
  });
 }
-function renderMap(){
+function renderMap(preserveView=false){
  if(!map)return;overlay.clearLayers();recordMarkers=new Map();selectedMarker=null;fitBounds=L.latLngBounds([]);
  const rows=state.detail?.measurements??[];let segment=[];const finish=()=>{if(segment.length>1)L.polyline(segment,{color:'#238267',weight:3.5,opacity:.85}).addTo(overlay);segment=[];};
  for(const row of rows){if(!finite(row.latitude)||!finite(row.longitude)){finish();continue;}const point=[row.latitude,row.longitude];segment.push(point);fitBounds.extend(point);}
@@ -117,7 +119,7 @@ function renderMap(){
  const stride=Math.max(1,Math.ceil(usable.length/800));
  usable.forEach((row,i)=>{if(i%stride!==0&&!row.isImpact&&i!==usable.length-1)return;const marker=L.circleMarker([row.latitude,row.longitude],{radius:row.isImpact?6:2.5,color:row.isImpact?'#c5644c':'#348a70',weight:row.isImpact?2:1,fillColor:row.isImpact?'#dd765e':'#348a70',fillOpacity:finite(row.accuracyMeters)&&row.accuracyMeters>50?.25:.9}).bindPopup(popup(row.measurementId,[`${time(row.measuredAt)} JST / ${row.isImpact?'衝撃あり':'衝撃なし'}`,`スコア ${number(row.qualityScore,1)} / 振動 ${number(row.vibration,2)}`,`傾斜 ${number(row.tiltDegrees,1)}° / GPS精度 ${number(row.accuracyMeters,1)}m`])).addTo(overlay);recordMarkers.set(row.measurementId,marker);});
  if(usable.length){L.marker([usable[0].latitude,usable[0].longitude],{icon:L.divIcon({className:'map-start',html:'S',iconSize:[21,21]})}).bindPopup('受領した軌跡の先頭').addTo(overlay);}
- if(fitBounds.isValid())map.fitBounds(fitBounds,{padding:[32,32],maxZoom:17});else map.setView([35.5556,139.657],16);
+ if(!preserveView){if(fitBounds.isValid())map.fitBounds(fitBounds,{padding:[32,32],maxZoom:17});else map.setView([35.5556,139.657],16);}
  if(state.cells.length>500)set('map-note',`地図は読み込み済みの先頭500区画を表示。区画一覧は読み込み済み${state.cells.length}件を表示します。`);
 }
 function renderRecords(){
@@ -182,4 +184,55 @@ async function loadMeasurementMore(){
 $('more-deliveries').addEventListener('click',()=>loadCollectionMore('deliveries'));
 $('more-cells').addEventListener('click',()=>loadCollectionMore('cells'));
 $('more-measurements').addEventListener('click',loadMeasurementMore);
-initializeMap();await reload();
+// 読み込み済みの範囲を先頭から取り直し、途中のページの更新も反映する。
+async function refreshPages(path,limit,key,count,readToEnd=false){
+ let result,cursor=null,items=[];const seen=new Set();
+ do{
+  const part=await request(`${path}?limit=${limit}${cursor?'&cursor='+encodeURIComponent(cursor):''}`);
+  result=part;items=mergeRows(items,part[key],key==='measurements'?'measurementId':key==='items'&&path==='/api/cells'?'cellId':'deliveryId');
+  cursor=part.nextToken??null;
+  if(cursor&&seen.has(cursor))throw new Error('続きを読み込めませんでした。更新してください。');
+  if(cursor)seen.add(cursor);
+ }while(cursor&&(readToEnd||items.length<count));
+ return {...result,[key]:items};
+}
+let refreshing=false,refreshTimer;
+function refreshIsCurrent(snapshot){return !$('reload').disabled&&!state.detailBusy&&!$('more-deliveries').disabled&&!$('more-cells').disabled&&snapshot.reloadToken===state.reloadToken&&snapshot.loadToken===state.loadToken&&snapshot.deliveries===state.deliveries&&snapshot.cells===state.cells&&snapshot.detail===state.detail&&snapshot.detailCursor===state.detail?.nextToken;}
+async function refreshDashboard(){
+ if(refreshing||document.hidden||$('reload').disabled||state.detailBusy||$('more-deliveries').disabled||$('more-cells').disabled)return;
+ refreshing=true;
+ const snapshot={...state,detailCursor:state.detail?.nextToken};
+ try{
+  const [list,cells]=await Promise.all([
+   refreshPages('/api/deliveries',50,'items',state.deliveries.length),
+   refreshPages('/api/cells',100,'items',state.cells.length)
+  ]);
+  let id=snapshot.selectedId??list.items[0]?.deliveryId??null,detail=null;
+  if(id){
+   try{detail=await refreshPages(`/api/deliveries/${encodeURIComponent(id)}`,500,'measurements',snapshot.detail?.measurements.length??500,!!snapshot.detail&&!snapshot.detail.nextToken);}
+   catch(error){
+    if(error.status!==404)throw error;
+    id=list.items.find(row=>row.deliveryId!==id)?.deliveryId??null;
+    if(id)detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500`);
+   }
+  }
+  if(!refreshIsCurrent(snapshot))return;
+  ++state.reloadToken;++state.loadToken;
+  state.deliveries=list.items;state.listCursor=list.nextToken??null;state.meta=list.meta;
+  state.cells=cells.items;state.cellsCursor=cells.nextToken??null;state.detail=detail;state.selectedId=id;
+  if(id!==snapshot.selectedId)state.page=0;
+  set('connection',cloudMode?'AWS参照APIに接続':base?'参照APIに接続':'ローカルAPIに接続');
+  set('mode-badge',modeLabel());set('dataset-label',state.meta.label);alert('');
+  renderList();renderCells();renderDetail(id===snapshot.selectedId);
+ }catch(error){
+  if(refreshIsCurrent(snapshot)){set('connection','自動更新を再試行中');alert(`自動更新に失敗しました：${error.message}。表示済みの値は前回取得したデータです。接続回復後に自動で更新します。`);}
+ }finally{refreshing=false;}
+}
+function scheduleRefresh(){
+ clearTimeout(refreshTimer);
+ if(!document.hidden)refreshTimer=setTimeout(async()=>{await refreshDashboard();scheduleRefresh();},5000);
+}
+async function resumeRefresh(){clearTimeout(refreshTimer);await refreshDashboard();scheduleRefresh();}
+document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeout(refreshTimer);else void resumeRefresh();});
+window.addEventListener('online',()=>void resumeRefresh());
+initializeMap();await reload();scheduleRefresh();
