@@ -8,7 +8,7 @@ async function dashboard(respond){
  const elements=new Map(),listeners={},timers=new Map(),calls=[],renders=[];
  let nextTimer=0;
  const document={hidden:false,getElementById(id){
-  if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,value:'',style:{},addEventListener(){}});
+  if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,value:'',style:{},classList:{toggle(){}},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  },querySelectorAll(){return [];},addEventListener(name,callback){listeners[name]=callback;}};
  const window={DASHBOARD_CONFIG:{},addEventListener(name,callback){listeners[name]=callback;}};
@@ -19,7 +19,7 @@ async function dashboard(respond){
  });
  const api=await vm.runInContext(`(async()=>{${source.replace('initializeMap();await reload();scheduleRefresh();','')}
  renderList=()=>{};renderCells=()=>{};renderDetail=preserve=>renders.push(preserve);
- return {state,refreshDashboard,scheduleRefresh,loadCollectionMore,loadDelivery};})()`,vm.createContext({...context,renders}));
+ return {state,refreshDashboard,scheduleRefresh,loadCollectionMore,loadDelivery,setMapMode,loadAllMap};})()`,vm.createContext({...context,renders}));
  Object.assign(api.state,{selectedId:'A',deliveries:[{deliveryId:'A'}],cells:[],meta:{label:'old'},
   detail:{deliveryId:'A',measurements:[{measurementId:'old'}],summary:{sampleCount:1},nextToken:null},page:2,eventsOnly:false});
  return {...api,elements,document,listeners,timers,calls,renders};
@@ -99,4 +99,66 @@ test('削除された配送は次の配送に切り替える',async()=>{
   path.startsWith('/api/deliveries/B?')?{deliveryId:'B',measurements:[],summary:{sampleCount:0}}:response(path));
  await app.refreshDashboard();assert.equal(app.state.selectedId,'B');assert.equal(app.state.detail.deliveryId,'B');
  assert.equal(app.state.page,0);assert.deepEqual(app.renders,[false]);
+});
+
+const mapDetail=id=>({deliveryId:id,measurements:[{measurementId:id+'-point',latitude:35,longitude:139}],nextToken:null});
+test('全配送モードは一覧の全ページを読み、配送ごとの抽出APIを2並列以内で取得する',async()=>{
+ let active=0,maximum=0;
+ const app=await dashboard(async path=>{
+  if(path.startsWith('/api/deliveries?'))return path.includes('cursor=next')?
+   {items:[{deliveryId:'C'},{deliveryId:'D'}],nextToken:null}:
+   {items:[{deliveryId:'A'},{deliveryId:'B'}],nextToken:'next'};
+  active++;maximum=Math.max(maximum,active);await new Promise(resolve=>setImmediate(resolve));active--;
+  assert.match(path,/limit=500&sampling=uniform/);
+  return mapDetail(path.split('/')[3].split('?')[0]);
+ });
+ const detail=app.state.detail;
+ await app.setMapMode('all');
+ assert.equal(app.state.mapMode,'all');assert.equal(app.state.allMapDetails.length,4);
+ assert.equal(app.state.deliveries.length,4);assert.equal(app.state.listCursor,null);
+ assert.equal(maximum,2);assert.equal(app.state.detail,detail);assert.equal(app.state.allMapBusy,false);
+ assert.match(app.elements.get('map-status').textContent,/4配送を取得・GPSあり4配送/);
+ const calls=app.calls.length;await app.setMapMode('selected');assert.equal(app.calls.length,calls);
+});
+
+test('全配送取得中に選択中モードへ戻ると古い応答を反映せず、追加取得も停止する',async()=>{
+ let release;const pending=new Promise(resolve=>release=resolve);
+ const app=await dashboard(async path=>{await pending;return {items:[{deliveryId:'B'}],nextToken:null};});
+ const loading=app.setMapMode('all');await app.setMapMode('selected');release();await loading;
+ assert.equal(app.state.mapMode,'selected');assert.equal(app.state.allMapBusy,false);
+ assert.equal(app.state.allMapDetails.length,0);assert.equal(app.state.deliveries[0].deliveryId,'A');
+ assert.equal(app.calls.length,1);
+});
+
+test('全配送の取得失敗では前回の全配送表示を保持し、次の取得で回復する',async()=>{
+ let fail=true;
+ const app=await dashboard(path=>{
+  if(path.startsWith('/api/deliveries?'))return {items:[{deliveryId:'A'}],nextToken:null};
+  if(fail)throw new Error('offline');return mapDetail('A');
+ });
+ const previous=[mapDetail('old')];app.state.allMapDetails=previous;
+ await app.setMapMode('all');assert.equal(app.state.allMapDetails,previous);assert.equal(app.state.allMapBusy,false);
+ assert.match(app.elements.get('map-status').textContent,/取得に失敗.*前回/);
+ fail=false;await app.loadAllMap();assert.equal(app.state.allMapDetails[0].deliveryId,'A');assert.equal(app.state.allMapError,'');
+});
+
+test('全配送モードの自動更新では新しい配送も取得する',async()=>{
+ const app=await dashboard(path=>{
+  if(path.startsWith('/api/deliveries?'))return {items:[{deliveryId:'A'},{deliveryId:'B'}],meta:{label:'new'},nextToken:null};
+  if(path.startsWith('/api/cells?'))return {items:[],nextToken:null};
+  return mapDetail(path.split('/')[3].split('?')[0]);
+ });
+ app.state.mapMode='all';app.state.allMapDetails=[mapDetail('A')];
+ await app.refreshDashboard();
+ assert.deepEqual(Array.from(app.state.allMapDetails,row=>row.deliveryId),['A','B']);
+ assert.equal(app.state.selectedId,'A');assert.equal(app.state.detail.deliveryId,'A');
+});
+
+test('配送なし・GPSなし・取得途中で削除された配送を区別する',async()=>{
+ const empty=await dashboard(()=>({items:[],nextToken:null}));await empty.setMapMode('all');
+ assert.equal(empty.state.allMapDetails.length,0);assert.match(empty.elements.get('map-status').textContent,/0配送を取得/);
+ const app=await dashboard(path=>path.startsWith('/api/deliveries?')?{items:[{deliveryId:'A'},{deliveryId:'B'}],nextToken:null}:
+  path.includes('/A?')?{deliveryId:'A',measurements:[]}:{error:'missing',status:404});
+ await app.setMapMode('all');assert.equal(app.state.allMapDetails.length,1);
+ assert.match(app.elements.get('map-status').textContent,/GPS座標がありません/);
 });
