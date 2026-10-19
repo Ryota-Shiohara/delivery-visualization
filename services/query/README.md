@@ -4,6 +4,8 @@ AWSでは配送一覧をsummaryだけから取得し、配送詳細はDeliveryTi
 
 各APIはlimit（1〜1000）とcursorを受け取り、nextTokenを返す。ローカルも同じページング形式。詳細はCのsummaryをGetItemし、avgScoreを再計算しない。healthは設定・プロセスの応答確認であり、DB全件読み出しはしない。
 
+配送詳細では `sampling=uniform&limit=500` により、先頭・末尾の各1件と最大50の時間帯から合計最大500件を返す。各時間帯は時刻索引の範囲条件とLimitを指定して1ページだけ取得し、続きを読まない。最大52回のQuery（時間帯は最大4並列）で、全計測の読み取りを避ける。画面の初回取得・自動更新で使用し、cursorとは併用しない。totalはsummary.sampleCount（なければnull）。空区間などでは500件未満となり、少数件でも全件取得は保証しない。
+
 - index.mjs：Lambda入口、SDK接続とモード選択。
 - dynamo-reader.mjs：Scan/GetItem/Queryのルート別取得。
 - pagination.mjs：件数・ルートと配送に結び付いた続き情報。

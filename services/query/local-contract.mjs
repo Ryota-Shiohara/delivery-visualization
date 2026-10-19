@@ -1,4 +1,4 @@
-import {pageLimit,encodeCursor,decodeCursor} from './pagination.mjs';
+import {pageLimit,encodeCursor,decodeCursor,samplingLimit,timeSample} from './pagination.mjs';
 // C担当が2026-10-11に共有した結果形式を使うローカル参照API。
 // DynamoDBのキー設計が未確定のため、AWS SDKやScanの前提を持ち込まない。
 export const TABLES = {
@@ -80,6 +80,8 @@ export function datasetMetadata(dataset) {
 }
 export function readQuery(dataset,pathname,params=new URLSearchParams()) {
  const limit=pageLimit(params),scope='local:'+pathname;
+ const sampleLimit=samplingLimit(params);
+ if(sampleLimit!==null&&!pathname.startsWith('/api/deliveries/'))throw new InputError('samplingは配送詳細で指定してください。');
  const key=decodeCursor(params.get('cursor'),scope),offset=key?.offset??0;
  if(!Number.isInteger(offset)||offset<0||params.has('offset'))throw new InputError('続き情報が不正です。');
  const next=length=>offset+limit<length?encodeCursor(scope,{offset:offset+limit}):null;
@@ -92,7 +94,7 @@ export function readQuery(dataset,pathname,params=new URLSearchParams()) {
   const summary=dataset.summaries.find(row=>row.deliveryId===id)??null;
   const all=dataset.analysis.filter(row=>row.deliveryId===id).sort((a,b)=>Date.parse(a.measuredAt)-Date.parse(b.measuredAt)||a.measurementId.localeCompare(b.measurementId));
   if(!summary&&!all.length)return null;
-  return {deliveryId:id,summary,measurements:all.slice(offset,offset+limit),total:all.length,nextToken:next(all.length),meta:datasetMetadata(dataset)};
+  return {deliveryId:id,summary,measurements:sampleLimit===null?all.slice(offset,offset+limit):timeSample(all,sampleLimit),total:sampleLimit===null?all.length:summary?.sampleCount??null,nextToken:sampleLimit===null?next(all.length):null,...(sampleLimit===null?{}:{sampling:'uniform'}),meta:datasetMetadata(dataset)};
  }
  if(pathname==='/api/cells')return {items:dataset.cells.slice(offset,offset+limit),nextToken:next(dataset.cells.length),scope:'全配送の地点集計',meta:datasetMetadata(dataset)};
  return null;

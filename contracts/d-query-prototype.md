@@ -13,7 +13,11 @@ Cのanalysis / summaries / cellsのフィールド名・データ形式は維持
 
 全APIにlimit（1〜1000、標準500）とcursorを指定できる。MAX_PAGE_ITEMSが小さい場合はその件数まで。続きは応答のnextTokenをcursorに入れ、同じAPI・配送で取得する。nextToken=nullなら終端。1MB制限などで要求件数より少ないページになる場合も、続き情報があれば読み進める。offset/nextOffsetは廃止。
 
-一覧は {items:[{deliveryId,summary}],nextToken,meta}、詳細は {deliveryId,summary,measurements,total,nextToken,meta}、区画は {items,scope,nextToken,meta}。AWS詳細のtotalはsummary.sampleCount（なければnull）であり、GSI内の件数を数えるための全件読みにしない。書き込み・索引反映の途中で件数差があり得る。summary未作成でも計測があれば詳細取得可能だが、一覧にはsummaryのある配送だけが出る。
+配送詳細に `sampling=uniform` を指定すると、時刻索引の昇順・降順Query（各Limit=1）で先頭・末尾を取得する。残りの取得枠を最大50の重ならない時間帯に均等配分し、各時間帯の先頭から1ページだけ取得する。通常は両端の時刻を除くミリ秒単位の期間を分割する。同一時刻または1ミリ秒差なら両端を含む期間を分割し、取得後にmeasurementIdで重複を除く。各Queryは時刻のBETWEEN条件とLimitで読み取りを制限し、LastEvaluatedKeyは追わない。最大52回のQuery、時間帯のQueryは最大4並列。DBから受け取る計測数・応答件数はともに最大500件で、全計測の読み取りは不要。
+
+`limit` が500未満ならその件数まで、1なら先頭1件、2なら両端のみ。時間帯の数は残り枠と期間のミリ秒数を上限とする。MAX_PAGE_ITEMSは各時間帯のQuery件数の上限にも適用する。空区間・取得枠未満の区間の余りは他区間で補充しないため500件未満の場合がある。時間に対する配分であり、計測件数に対する一定割合や少数件の全件取得を保証しない。衝撃・ピークが取得されない場合がある。cursorとの併用や他のAPIへの指定は400。応答に `sampling: "uniform"` を追加し、`total` はsummary.sampleCount（なければnull）、`nextToken` はnullとなる。summaryは再計算しない。画面の初回取得・自動更新はこの方式を使う。ローカルではメモリ上のJSONに同じ時間帯の配分を適用する。GSIは非同期反映であり、各Query間のスナップショット整合性は保証しない。
+
+一覧は {items:[{deliveryId,summary}],nextToken,meta}、詳細は {deliveryId,summary,measurements,total,nextToken,meta}、区画は {items,scope,nextToken,meta}。通常のページ取得ではAWS詳細のtotalはsummary.sampleCount（なければnull）であり、GSI内の件数を数えるための全件読みにしない。書き込み・索引反映の途中で件数差があり得る。summary未作成でも計測があれば詳細取得可能だが、一覧にはsummaryのある配送だけが出る。
 
 索引：DeliveryTimeIndex / HASH deliveryId（S）/ RANGE measuredAt（S）/ Projection ALL。元テーブルのキーmeasurementIdを保持する。measuredAtはAから来るUTCのISO日時を維持する。GSIは結果テーブルと非同期で反映される。
 

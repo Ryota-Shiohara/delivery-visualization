@@ -1,5 +1,5 @@
 import {validateRecords,InputError} from './local-contract.mjs';
-import {pageLimit,encodeCursor,decodeCursor} from './pagination.mjs';
+import {pageLimit,encodeCursor,decodeCursor,samplingLimit,timeBuckets,sortMeasurements} from './pagination.mjs';
 export class IndexUnavailableError extends Error {}
 const metadata={mode:'dynamodb',label:'配送・路面の評価',sources:{analysis:'DynamoDB',summaries:'DynamoDB',cells:'DynamoDB'}};
 function startKey(params,scope,names){
@@ -15,6 +15,8 @@ export function createDynamoReader({scan,query,get,names,indexName='DeliveryTime
  return async(pathname,params=new URLSearchParams())=>{
   if(pathname==='/api/health')return {status:'ok',deployment:'aws',dataMode:'dynamodb',queryMode:'delivery-index-pages'};
   const limit=pageLimit(params,maxPageItems);
+  const sampleLimit=samplingLimit(params);
+  if(sampleLimit!==null&&!pathname.startsWith('/api/deliveries/'))throw new InputError('samplingは配送詳細で指定してください。');
   if(params.has('offset'))throw new InputError('offsetではなく、応答のnextTokenをcursorに指定してください。');
   if(pathname==='/api/deliveries'||pathname==='/api/cells'){
    const type=pathname==='/api/deliveries'?'summaries':'cells',scope='dynamodb:'+pathname;
@@ -31,16 +33,42 @@ export function createDynamoReader({scan,query,get,names,indexName='DeliveryTime
    if(key&&key.deliveryId.S!==id)throw new InputError('別の配送の続き情報は使えません。');
    const summaryPage=await get({TableName:names.summaries,Key:{deliveryId:{S:id}}});
    const summary=summaryPage.Item?validateRecords('summaries',[summaryPage.Item])[0]:null;
-   let page;
-   try{page=await query({TableName:names.analysis,IndexName:indexName,KeyConditionExpression:'#delivery = :delivery',ExpressionAttributeNames:{'#delivery':'deliveryId'},ExpressionAttributeValues:{':delivery':{S:id}},ScanIndexForward:true,Limit:limit,...(key?{ExclusiveStartKey:key}:{})});}
-   catch(error){
-    if(error.name==='ResourceNotFoundException'||(error.name==='ValidationException'&&/index|backfill/i.test(error.message)))throw new IndexUnavailableError(`解析結果テーブルの${indexName}を作成し、ACTIVEになってから再読み込みしてください。`);
-    throw error;
+   const queryPage=async options=>{
+    let page;
+    try{page=await query({TableName:names.analysis,IndexName:indexName,KeyConditionExpression:'#delivery = :delivery',ExpressionAttributeNames:{'#delivery':'deliveryId'},ExpressionAttributeValues:{':delivery':{S:id}},ScanIndexForward:true,...options});}
+    catch(error){
+     if(error.name==='ResourceNotFoundException'||(error.name==='ValidationException'&&/index|backfill/i.test(error.message)))throw new IndexUnavailableError(`解析結果テーブルの${indexName}を作成し、ACTIVEになってから再読み込みしてください。`);
+     throw error;
+    }
+    const rows=validateRecords('analysis',page.Items??[]);
+    if(rows.some(row=>row.deliveryId!==id))throw new Error('索引から別の配送の計測が返されました。');
+    return {...page,rows};
+   };
+   if(sampleLimit!==null){
+    const first=await queryPage({Limit:1});
+    const selected=[...first.rows];
+    if(selected.length&&sampleLimit>1){
+     const last=await queryPage({Limit:1,ScanIndexForward:false});
+     selected.push(...last.rows);
+     if(last.rows.length&&last.rows[0].measurementId!==first.rows[0].measurementId){
+      const buckets=timeBuckets(first.rows[0].measuredAt,last.rows[0].measuredAt,sampleLimit);
+      // 問い合わせは最大4並列。各時間帯は1ページだけ読み、続きは追わない。
+      let next=0;
+      await Promise.all(Array.from({length:Math.min(4,buckets.length)},async()=>{
+       while(next<buckets.length){
+        const bucket=buckets[next++];
+        const part=await queryPage({Limit:Math.min(bucket.limit,maxPageItems),KeyConditionExpression:'#delivery = :delivery AND #time BETWEEN :start AND :end',ExpressionAttributeNames:{'#delivery':'deliveryId','#time':'measuredAt'},ExpressionAttributeValues:{':delivery':{S:id},':start':{S:bucket.start},':end':{S:bucket.end}}});
+        selected.push(...part.rows);
+       }
+      }));
+     }
+    }
+    if(!summary&&!selected.length)return null;
+    return {deliveryId:id,summary,measurements:sortMeasurements(selected),total:summary?.sampleCount??null,nextToken:null,sampling:'uniform',meta:metadata};
    }
-   const measurements=validateRecords('analysis',page.Items??[]);
-   if(measurements.some(row=>row.deliveryId!==id))throw new Error('索引から別の配送の計測が返されました。');
-   if(!summary&&!measurements.length&&!page.LastEvaluatedKey)return null;
-   return {deliveryId:id,summary,measurements,total:summary?.sampleCount??null,nextToken:encodeCursor(scope,page.LastEvaluatedKey),meta:metadata};
+   const page=await queryPage({Limit:limit,...(key?{ExclusiveStartKey:key}:{})});
+   if(!summary&&!page.rows.length&&!page.LastEvaluatedKey)return null;
+   return {deliveryId:id,summary,measurements:page.rows,total:summary?.sampleCount??null,nextToken:encodeCursor(scope,page.LastEvaluatedKey),meta:metadata};
   }
   return null;
  };

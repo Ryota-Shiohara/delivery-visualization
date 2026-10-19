@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import {createDynamoReader} from '../services/query/dynamo-reader.mjs';
 import {createQueryHandler} from '../services/query/aws-handler-core.mjs';
 import {readQuery} from '../services/query/local-contract.mjs';
-import {encodeCursor} from '../services/query/pagination.mjs';
+import {encodeCursor,timeBuckets,timeSample} from '../services/query/pagination.mjs';
 const fixture=JSON.parse(await readFile(new URL('../data/samples/d-dashboard/c-shared-example.json',import.meta.url),'utf8'));
 const names={analysis:'analysis',summaries:'summaries',cells:'cells'};
 const summary=fixture.summaries[0],id=summary.deliveryId,row=fixture.analysis[0];
@@ -64,4 +64,68 @@ test('ローカルでも同じcursor形式で続きが読める',()=>{
  const first=readQuery(dataset,'/api/deliveries/'+id,new URLSearchParams('limit=1'));
  const second=readQuery(dataset,'/api/deliveries/'+id,new URLSearchParams({limit:'1',cursor:first.nextToken}));
  assert.equal(first.measurements[0].measurementId,row.measurementId);assert.equal(second.measurements[0].measurementId,'second');assert.equal(second.nextToken,null);
+});
+
+const samplingRows=count=>Array.from({length:count},(_,i)=>({...row,measurementId:'m-'+String(i).padStart(5,'0'),measuredAt:new Date(Date.UTC(2026,9,12)+i*1000).toISOString()}));
+function samplingReader(rows,{maxPageItems=100,summaryItem=summary}={}){
+ const inputs=[];let readCount=0;
+ const reader=make({maxPageItems,get:async()=>summaryItem?{Item:summaryItem}:{},query:async input=>{
+  inputs.push(input);assert.equal(input.ExclusiveStartKey,undefined);assert.equal(input.FilterExpression,undefined);
+  const values=input.ExpressionAttributeValues;
+  let matches=rows.filter(row=>!values[':start']||(row.measuredAt>=values[':start'].S&&row.measuredAt<=values[':end'].S));
+  if(!input.ScanIndexForward)matches=matches.slice().reverse();
+  const items=matches.slice(0,input.Limit);readCount+=items.length;
+  // 続きがあっても抽出処理がページを追わないことを確認する。
+  return {Items:items,LastEvaluatedKey:{measurementId:{S:'do-not-follow'}}};
+ }});
+ return {reader,inputs,get readCount(){return readCount;}};
+}
+
+test('AWSは先頭・末尾と50時間帯だけをQueryし、6001件全体を読まずに500件を返す',async()=>{
+ const rows=Array.from({length:6001},(_,i)=>({...row,measurementId:'m-'+String(i).padStart(5,'0'),measuredAt:new Date(Date.UTC(2026,9,12)+i*1000).toISOString()}));
+ const db=samplingReader(rows);
+ const params=new URLSearchParams('limit=500&sampling=uniform');
+ const aws=await db.reader('/api/deliveries/'+id,params);
+ const local=readQuery({...fixture,analysis:rows},'/api/deliveries/'+id,params);
+ assert.equal(db.inputs.length,52);assert.equal(db.readCount,500);assert.equal(aws.measurements.length,500);
+ assert.equal(aws.measurements[0].measurementId,rows[0].measurementId);assert.equal(aws.measurements.at(-1).measurementId,rows.at(-1).measurementId);
+ assert(db.inputs.slice(2).every(input=>input.KeyConditionExpression.includes('BETWEEN')&&input.Limit<=10));
+ assert.deepEqual(aws.measurements,local.measurements);
+ assert.equal(aws.total,summary.sampleCount);assert.equal(aws.summary.sampleCount,summary.sampleCount);
+ assert.equal(aws.nextToken,null);assert.equal(aws.sampling,'uniform');
+});
+
+test('空区間・同時刻・短時間・少数件でも重複せず上限を守る',async()=>{
+ const regular=samplingRows(6001);
+ const datasets=[[],[row],regular.slice(0,2),regular.filter((_,i)=>i<100||i===6000),regular.map(r=>({...r,measuredAt:row.measuredAt})),regular.map((r,i)=>({...r,measuredAt:new Date(Date.UTC(2026,9,12)+(i<3000?0:1)).toISOString()}))];
+ for(const rows of datasets){
+  for(const limit of [1,2,3,50,500]){
+   const db=samplingReader(rows,{summaryItem:null});
+   const result=await db.reader('/api/deliveries/'+id,new URLSearchParams({sampling:'uniform',limit:String(limit)}));
+   if(!rows.length){assert.equal(result,null);continue;}
+   assert(result.measurements.length<=limit);assert(db.readCount<=limit);
+   assert.equal(new Set(result.measurements.map(r=>r.measurementId)).size,result.measurements.length);
+   assert.equal(result.total,null);assert.equal(result.nextToken,null);
+  }
+ }
+ const sparse=datasets[3],sample=timeSample(sparse,500);
+ assert(sample.length<500);assert.equal(sample.at(-1).measurementId,sparse.at(-1).measurementId);
+ const buckets=timeBuckets(regular[0].measuredAt,regular.at(-1).measuredAt,500);
+ assert.equal(buckets.length,50);assert.equal(buckets.reduce((n,b)=>n+b.limit,2),500);
+ for(let i=1;i<buckets.length;i++)assert(Date.parse(buckets[i].start)>Date.parse(buckets[i-1].end));
+});
+
+test('MAX_PAGE_ITEMSが少ない場合も各区間の続きを読まずに取得量を抑える',async()=>{
+ const db=samplingReader(samplingRows(6001),{maxPageItems:1});
+ const result=await db.reader('/api/deliveries/'+id,new URLSearchParams('sampling=uniform'));
+ assert.equal(db.inputs.length,52);assert.equal(db.readCount,52);assert.equal(result.measurements.length,52);
+ assert(db.inputs.every(input=>input.Limit===1));
+});
+
+test('不正な抽出モードとcursorの併用はAWS呼び出し前に拒否する',async()=>{
+ for(const text of ['sampling=random','sampling=uniform&cursor=broken']){
+  await assert.rejects(()=>make()('/api/deliveries/'+id,new URLSearchParams(text)),/sampling/);
+  assert.throws(()=>readQuery(fixture,'/api/deliveries/'+id,new URLSearchParams(text)),/sampling/);
+ }
+ await assert.rejects(()=>make()('/api/cells',new URLSearchParams('sampling=uniform')),/配送詳細/);
 });

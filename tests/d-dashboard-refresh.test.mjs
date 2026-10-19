@@ -72,13 +72,16 @@ test('取得処理を重複させず、完了後5秒で次回更新する',async
  assert.equal(app.timers.size,0);release();await refresh;assert.equal(app.calls.length,3);
  assert.equal([...app.timers.values()][0].ms,5000);
 });
-test('全件読み込み済みの配送に新しいページが追加されても自動反映する',async()=>{
+test('初回取得と自動更新は全区間の最大500件を要求する',async()=>{
  const app=await dashboard(path=>{
   if(!path.startsWith('/api/deliveries/A?'))return response(path);
-  return path.includes('cursor=next')?{deliveryId:'A',measurements:[{measurementId:'added'}],summary:{sampleCount:2},nextToken:null}:
-   {deliveryId:'A',measurements:[{measurementId:'old'}],summary:{sampleCount:2},nextToken:'next'};
+  const params=new URL(path,'http://localhost').searchParams;
+  assert.equal(params.get('sampling'),'uniform');assert.equal(params.get('limit'),'500');assert.equal(params.has('cursor'),false);
+  return {deliveryId:'A',measurements:[{measurementId:'first'},{measurementId:'last'}],summary:{sampleCount:6001},sampling:'uniform',nextToken:null};
  });
- await app.refreshDashboard();assert.deepEqual(Array.from(app.state.detail.measurements,row=>row.measurementId),['old','added']);
+ await app.loadDelivery('A');await app.refreshDashboard();
+ assert.equal(app.calls.filter(({path})=>path.startsWith('/api/deliveries/A?')).length,2);
+ assert.deepEqual(Array.from(app.state.detail.measurements,row=>row.measurementId),['first','last']);
  assert.equal(app.state.detail.nextToken,null);
 });
 test('追加読み込み済みの一覧の範囲と選択を保持する',async()=>{
