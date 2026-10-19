@@ -24,6 +24,10 @@ Parameters:
     Type: String
     Default: DeliveryTimeIndex
     AllowedPattern: '[A-Za-z0-9_.-]{3,255}'
+  ImpactIndexName:
+    Type: String
+    Default: ImpactDeliveryTimeIndex
+    AllowedPattern: '[A-Za-z0-9_.-]{3,255}'
   MaxPageItems:
     Type: Number
     Default: 1000
@@ -56,10 +60,20 @@ Resources:
           AttributeType: S
         - AttributeName: measuredAt
           AttributeType: S
+        - AttributeName: impactDeliveryId
+          AttributeType: S
       GlobalSecondaryIndexes:
         - IndexName: !Ref AnalysisIndexName
           KeySchema:
             - AttributeName: deliveryId
+              KeyType: HASH
+            - AttributeName: measuredAt
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: !Ref ImpactIndexName
+          KeySchema:
+            - AttributeName: impactDeliveryId
               KeyType: HASH
             - AttributeName: measuredAt
               KeyType: RANGE
@@ -112,6 +126,7 @@ Resources:
           SUMMARY_TABLE: !If [CreatePrototypeTables, !Ref PrototypeSummaryTable, !Ref SummaryTableName]
           CELL_TABLE: !If [CreatePrototypeTables, !Ref PrototypeCellTable, !Ref CellTableName]
           ANALYSIS_INDEX: !Ref AnalysisIndexName
+          IMPACT_INDEX: !Ref ImpactIndexName
           MAX_PAGE_ITEMS: !Sub '${MaxPageItems}'
   QueryLogGroup:
     Type: AWS::Logs::LogGroup

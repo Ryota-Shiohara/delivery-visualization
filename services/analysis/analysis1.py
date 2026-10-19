@@ -77,7 +77,7 @@ def analyze_measurement(m: dict) -> dict:
 
     pos = m.get("position") or {}
 
-    return {
+    result = {
         "measurementId": m["measurementId"],
         "deliveryId": m["deliveryId"],
         "measuredAt": m["measuredAt"],
@@ -91,6 +91,9 @@ def analyze_measurement(m: dict) -> dict:
         "speedMetersPerSecond": pos.get("speedMetersPerSecond"),
         "algorithmVersion": ALGORITHM_VERSION,
     }
+    if result["isImpact"]:
+        result["impactDeliveryId"] = result["deliveryId"]
+    return result
 
 
 def to_ddb(value: Any) -> Any:

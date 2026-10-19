@@ -11,3 +11,5 @@
 解析ハンドラはanalysis1.py、構成定義はinfra/analysis.yamlです。
 
 解析結果テーブルにはDeliveryTimeIndex（deliveryId / measuredAt、文字列、Projection ALL）を定義し、Dが配送単位で計測を取得します。[既存環境への更新手順](../../docs/deployment/d-query-index-upgrade.md)を参照してください。
+
+衝撃専用の `ImpactDeliveryTimeIndex`（impactDeliveryId / measuredAt、文字列、Projection ALL）も定義します。新規の衝撃レコードのみ `impactDeliveryId=deliveryId` を保存し、通常計測を索引から除きます。過去分は `scripts/backfill-impact-index.ps1` で補完できます。検証は `python tests/analysis-impact-index.test.py` で実行します（AWS SDKと通信はモック）。

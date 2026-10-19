@@ -11,11 +11,14 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions: [{AttributeName: measurementId, AttributeType: S}, {AttributeName: deliveryId, AttributeType: S}, {AttributeName: measuredAt, AttributeType: S}]
+      AttributeDefinitions: [{AttributeName: measurementId, AttributeType: S}, {AttributeName: deliveryId, AttributeType: S}, {AttributeName: measuredAt, AttributeType: S}, {AttributeName: impactDeliveryId, AttributeType: S}]
       KeySchema: [{AttributeName: measurementId, KeyType: HASH}]
       GlobalSecondaryIndexes:
         - IndexName: DeliveryTimeIndex
           KeySchema: [{AttributeName: deliveryId, KeyType: HASH}, {AttributeName: measuredAt, KeyType: RANGE}]
+          Projection: {ProjectionType: ALL}
+        - IndexName: ImpactDeliveryTimeIndex
+          KeySchema: [{AttributeName: impactDeliveryId, KeyType: HASH}, {AttributeName: measuredAt, KeyType: RANGE}]
           Projection: {ProjectionType: ALL}
   SummaryTable:
     Type: AWS::DynamoDB::Table
@@ -68,3 +71,6 @@ Outputs:
 
   AnalysisIndexName:
     Value: DeliveryTimeIndex
+
+  ImpactIndexName:
+    Value: ImpactDeliveryTimeIndex

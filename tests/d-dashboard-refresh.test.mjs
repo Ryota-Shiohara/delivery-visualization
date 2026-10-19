@@ -4,7 +4,7 @@ import {readFile} from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source=await readFile(new URL('../apps/dashboard/app.js',import.meta.url),'utf8');
-async function dashboard(respond){
+async function dashboard(respond,{impactsRespond=()=>({impacts:'only',measurements:[],nextToken:null})}={}){
  const elements=new Map(),listeners={},timers=new Map(),calls=[],renders=[];
  let nextTimer=0,now=Date.UTC(2026,9,19);
  class ClockDate extends Date{static now(){return now;}}
@@ -16,7 +16,7 @@ async function dashboard(respond){
  const context=vm.createContext({document,window,AbortSignal,URL,Intl,console,Date:ClockDate,
   setTimeout(callback,ms){const id=++nextTimer;timers.set(id,{callback,ms});return id;},
   clearTimeout(id){timers.delete(id);},
-  async fetch(path,options){calls.push({path,options});const data=await respond(path);return {ok:!data.error,status:data.status??200,json:async()=>data};}
+  async fetch(path,options){calls.push({path,options});const data=await (path.includes('impacts=only')?impactsRespond(path):respond(path));return {ok:!data.error,status:data.status??200,json:async()=>data};}
  });
  const api=await vm.runInContext(`(async()=>{${source.replace('initializeMap();await reload();scheduleRefresh();','')}
  renderList=()=>{};renderCells=()=>{};renderDetail=preserve=>renders.push(preserve);
@@ -70,7 +70,7 @@ test('取得処理を重複させず、完了後5秒で次回更新する',async
  const app=await dashboard(async path=>{await pending;return response(path);});
  app.scheduleRefresh();const timer=[...app.timers.values()][0];app.timers.clear();
  const refresh=timer.callback();await app.refreshDashboard();assert.equal(app.calls.length,2);
- assert.equal(app.timers.size,0);release();await refresh;assert.equal(app.calls.length,3);
+ assert.equal(app.timers.size,0);release();await refresh;assert.equal(app.calls.length,4);
  assert.equal([...app.timers.values()][0].ms,5000);
 });
 test('初回取得と自動更新は全区間の最大500件を要求する',async()=>{
@@ -81,7 +81,7 @@ test('初回取得と自動更新は全区間の最大500件を要求する',asy
   return {deliveryId:'A',measurements:[{measurementId:'first'},{measurementId:'last'}],summary:{sampleCount:6001},sampling:'uniform',nextToken:null};
  });
  await app.loadDelivery('A');await app.refreshDashboard();
- assert.equal(app.calls.filter(({path})=>path.startsWith('/api/deliveries/A?')).length,2);
+ assert.equal(app.calls.filter(({path})=>path.startsWith('/api/deliveries/A?')&&path.includes('sampling=uniform')).length,2);
  assert.deepEqual(Array.from(app.state.detail.measurements,row=>row.measurementId),['first','last']);
  assert.equal(app.state.detail.nextToken,null);
 });
@@ -163,7 +163,7 @@ test('配送なし・GPSなし・取得途中で削除された配送を区別�
  assert.match(app.elements.get('map-status').textContent,/GPS座標がありません/);
 });
 
-const versionedSummary=(version=0)=>({updatedAt:new Date(Date.UTC(2026,9,19)+version*1000).toISOString(),sampleCount:100+version,impactCount:1,avgScore:90,maxVibration:4,maxTilt:10});
+const versionedSummary=(version=0)=>({updatedAt:new Date(Date.UTC(2026,9,19)+version*1000).toISOString(),sampleCount:100+version,impactCount:0,avgScore:90,maxVibration:4,maxTilt:10});
 function deliveryResponses(getItems){
  return path=>{
   const items=getItems();
@@ -173,7 +173,7 @@ function deliveryResponses(getItems){
   return {...mapDetail(id),summary:items.find(item=>item.deliveryId===id)?.summary};
  };
 }
-const detailCalls=app=>app.calls.filter(({path})=>/^\/api\/deliveries\//.test(path));
+const detailCalls=app=>app.calls.filter(({path})=>/^\/api\/deliveries\//.test(path)&&path.includes('sampling=uniform'));
 
 test('全配送の更新がなければ一覧と区画だけ取得し、更新された配送と新規配送だけ再取得する',async()=>{
  let items=['A','B','C'].map(deliveryId=>({deliveryId,summary:versionedSummary()}));
@@ -245,4 +245,35 @@ test('取得中にモードを変更した結果をキャッシュへ保存し�
  const app=await dashboard(async path=>{if(path.startsWith('/api/deliveries/A?')){entered();await pending;}return respond(path);});
  const loading=app.setMapMode('all');await started;await app.setMapMode('selected');release();await loading;
  app.calls.length=0;await app.setMapMode('all');assert.equal(detailCalls(app).length,1);
+});
+
+test('衝撃は全ページを取得し、軌跡の抽出にない衝撃も保持する',async()=>{
+ const app=await dashboard(response,{impactsRespond:path=>path.includes('cursor=next')?
+  {impacts:'only',measurements:[{measurementId:'hidden-impact',isImpact:true}],nextToken:null}:
+  {impacts:'only',measurements:[],nextToken:'next'}});
+ await app.loadDelivery('A');
+ assert.equal(app.state.detail.measurements[0].measurementId,'new');
+ assert.equal(app.state.detail.impacts[0].measurementId,'hidden-impact');
+ assert.equal(app.calls.filter(({path})=>path.includes('impacts=only')).length,2);
+});
+
+test('衝撃取得だけの失敗は軌跡を保持し、10秒後に再取得して回復する',async()=>{
+ let failed=true;
+ const summary=versionedSummary();
+ const app=await dashboard(deliveryResponses(()=>[{deliveryId:'A',summary}]),{impactsRespond:()=>failed?{error:'index unavailable',status:503}:{impacts:'only',measurements:[],nextToken:null}});
+ app.state.deliveries=[{deliveryId:'A',summary}];await app.loadDelivery('A');
+ assert.equal(app.state.detail.measurements.length,1);assert.match(app.state.detail.impactError,/index unavailable/);
+ failed=false;app.advance(10000);await app.refreshDashboard();assert.equal(app.state.detail.impactError,undefined);assert.equal(app.state.detail.impacts.length,0);
+});
+
+test('衝撃の続き情報が循環したら全件取得成功とせず失敗を表示する',async()=>{
+ const app=await dashboard(response,{impactsRespond:()=>({impacts:'only',measurements:[],nextToken:'same'})});
+ await app.loadDelivery('A');assert.match(app.state.detail.impactError,/続きを取得/);assert.equal(app.state.detail.impacts,undefined);
+});
+
+
+test('旧APIがimpacts指定を無視して通常計測を返しても全衝撃として扱わない',async()=>{
+ const app=await dashboard(response,{impactsRespond:()=>({measurements:[{measurementId:'normal',isImpact:false}],nextToken:'more-normal'})});
+ await app.loadDelivery('A');assert.equal(app.state.detail.impacts,undefined);assert.match(app.state.detail.impactError,/対応していないAPI/);
+ assert.equal(app.calls.filter(({path})=>path.includes('impacts=only')).length,1);
 });

@@ -59,3 +59,16 @@ Dのみのprototypeモードでは、同じDのStackNameで再実行するとD�
 モックのDynamoDBで6001件を500件ずつ13回で取得し、重複なし・集計スコア維持を確認。ローカルブラウザで計測500→1000件、配送50→60件、路面100→150件を確認。実AWSへのデプロイとGSI構築は未実施。今回のコードを反映するには上記の更新が必要。
 
 参照：[GSIの既存テーブルへの追加](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GSI.OnlineOps.html)、[Queryのページング](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Query.Pagination.html)。
+
+## 衝撃を全件表示するための追加更新
+
+`ImpactDeliveryTimeIndex` を追加しました。パーティションキーは `impactDeliveryId`（S）、ソートキーは `measuredAt`（S）、ProjectionはALLです。`analysis1.py` は `isImpact=true` の結果だけに `impactDeliveryId=deliveryId` を保存します。通常計測にはこの属性を保存せず、既存の `DeliveryTimeIndex` は軌跡の抽出に継続使用します。
+
+反映は構築担当者が次の順に実施します。この変更作業ではデプロイしていません。
+
+1. 既存のCスタックを `infra/analysis.yaml` と変更後の `analysis1.py` で更新し、衝撃専用GSIがACTIVEになるまで待つ。
+2. 過去データには `scripts/backfill-impact-index.ps1` を利用する。既定で `.local/deploy-all/result.json` のテーブル名・リージョン・アカウントを使う。引数なしで確認し、`-Apply` で一括付与する。過去に付与済みでも、解析Lambda更新までに新規データが入った場合は再実行する。
+3. 同じ構築結果の3テーブルとリージョンでDを更新する。`deploy-dashboard.ps1` は通常計測・衝撃の両GSIのキー、Projection、ACTIVE状態を検証する。カスタム索引名の場合は `-ImpactIndexName` を指定する。
+4. 公開画面を再読込し、衝撃の取得件数・座標なし件数・地図のマーカーを確認する。専用APIの `nextToken` がなくなるまで取得した衝撃を表示する。
+
+GSIが未作成の場合、専用APIは503を返します。画面は全件取得失敗を表示し、抽出軌跡と抽出内の衝撃を表示します。全配送モードでも各配送の衝撃を別々に取得します。GSIは非同期反映のため、配送集計との件数差がある場合は反映待ちを表示し再取得します。

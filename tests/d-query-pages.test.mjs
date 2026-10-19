@@ -129,3 +129,32 @@ test('不正な抽出モードとcursorの併用はAWS呼び出し前に拒否�
  }
  await assert.rejects(()=>make()('/api/cells',new URLSearchParams('sampling=uniform')),/配送詳細/);
 });
+
+test('衝撃専用GSIをQueryし、抽出されない衝撃も全ページ取得できる',async()=>{
+ const impacts=Array.from({length:1001},(_,i)=>({...row,measurementId:'impact-'+i,isImpact:true,impactDeliveryId:id}));
+ let calls=0;
+ const reader=make({get:async()=>({Item:{...summary,sampleCount:100000,impactCount:1001}}),query:async input=>{
+  calls++;assert.equal(input.IndexName,'ImpactDeliveryTimeIndex');assert.equal(input.ExpressionAttributeNames['#delivery'],'impactDeliveryId');assert.equal(input.FilterExpression,undefined);
+  const start=input.ExclusiveStartKey?Number(input.ExclusiveStartKey.measurementId.S.slice(7))+1:0;
+  const items=impacts.slice(start,start+input.Limit),last=items.at(-1);
+  return {Items:items,...(start+items.length<impacts.length?{LastEvaluatedKey:{measurementId:{S:last.measurementId},impactDeliveryId:{S:id},measuredAt:{S:last.measuredAt}}}:{})};
+ }});
+ let cursor=null,rows=[];
+ do{const page=await reader('/api/deliveries/'+id,new URLSearchParams({impacts:'only',limit:'500',...(cursor?{cursor}:{})}));rows.push(...page.measurements);cursor=page.nextToken;assert.equal(page.total,1001);assert.equal(page.impacts,'only');}while(cursor);
+ assert.equal(calls,3);assert.equal(rows.length,1001);assert.equal(new Set(rows.map(row=>row.measurementId)).size,1001);
+});
+
+test('衝撃cursorと通常計測cursorを混用せず、samplingとの併用も拒否する',async()=>{
+ const cursor=encodeCursor('dynamodb:delivery:'+id,{measurementId:{S:'x'},deliveryId:{S:id},measuredAt:{S:row.measuredAt}});
+ for(const params of [{impacts:'only',cursor},{impacts:'only',sampling:'uniform'},{impacts:'bad'}])await assert.rejects(()=>make()('/api/deliveries/'+id,new URLSearchParams(params)),/続き情報|impacts/);
+ const local=readQuery({...fixture,analysis:[row,{...row,measurementId:'impact',isImpact:true}]},'/api/deliveries/'+id,new URLSearchParams('impacts=only'));
+ assert.equal(local.measurements.length,1);assert.equal(local.measurements[0].measurementId,'impact');assert.equal(local.total,1);
+});
+
+test('衝撃索引の未作成は503、衝撃以外が索引にある場合は失敗として扱う',async()=>{
+ const reader=make({get:async()=>({Item:summary}),query:async()=>{throw Object.assign(new Error('index not found'),{name:'ResourceNotFoundException'});}});
+ const unavailable=await createQueryHandler(reader)({...event('/api/deliveries/'+id),rawQueryString:'impacts=only'});
+ assert.equal(unavailable.statusCode,503);assert.match(JSON.parse(unavailable.body).error,/ImpactDeliveryTimeIndex/);
+ const invalid=make({get:async()=>({Item:summary}),query:async()=>({Items:[{...row,isImpact:false,impactDeliveryId:id}]})});
+ await assert.rejects(()=>invalid('/api/deliveries/'+id,new URLSearchParams('impacts=only')),/対象外/);
+});

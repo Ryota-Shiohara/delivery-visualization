@@ -10,8 +10,36 @@ function summaryVersion(summary){
 async function deliveryEntry(item){
  const cached=deliveryCache.get(item.deliveryId),version=summaryVersion(item.summary),now=Date.now();
  if(version&&cached?.version===version&&now-cached.fetchedAt<DETAIL_RECHECK_MS&&(!cached.retryAt||now<cached.retryAt))return cached;
- const detail=await request(`/api/deliveries/${encodeURIComponent(item.deliveryId)}?limit=500&sampling=uniform`);
- return {detail,version,fetchedAt:Date.now(),retryAt:!cached||cached.version!==version?Date.now()+INDEX_RETRY_MS:null};
+ const [detail,impactResult]=await Promise.all([
+  request(`/api/deliveries/${encodeURIComponent(item.deliveryId)}?limit=500&sampling=uniform`),
+  readImpacts(item.deliveryId).then(impacts=>({impacts}),error=>({impactError:error.message}))
+ ]);
+ Object.assign(detail,impactResult);
+ const incomplete=detail.impactError||(detail.impacts&&Number.isFinite(detail.summary?.impactCount)&&detail.impacts.length!==detail.summary.impactCount);
+ return {detail,version,fetchedAt:Date.now(),retryAt:incomplete||!cached||cached.version!==version?Date.now()+INDEX_RETRY_MS:null};
+}
+async function readImpacts(id){
+ let cursor=null,rows=[];const seen=new Set();
+ do{
+  const part=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500&impacts=only${cursor?'&cursor='+encodeURIComponent(cursor):''}`);
+  if(part.impacts!=='only')throw new Error('衝撃の全件取得に対応していないAPIです。');
+  rows=mergeRows(rows,part.measurements,'measurementId');cursor=part.nextToken??null;
+  if(cursor&&seen.has(cursor))throw new Error('衝撃データの続きを取得できません。');
+  if(cursor)seen.add(cursor);
+ }while(cursor);
+ return rows.sort((a,b)=>Date.parse(a.measuredAt)-Date.parse(b.measuredAt)||a.measurementId.localeCompare(b.measurementId));
+}
+function displayRows(detail){
+ return mergeRows(detail?.measurements??[],detail?.impacts??[],'measurementId').sort((a,b)=>Date.parse(a.measuredAt)-Date.parse(b.measuredAt)||a.measurementId.localeCompare(b.measurementId));
+}
+function impactCoverage(detail){
+ if(!detail)return '';
+ if(detail.impactError)return '衝撃の全件取得に失敗しました。取得済みの計測に含まれる衝撃のみ表示しています。';
+ if(!detail.impacts)return '衝撃を取得中です。';
+ const missing=detail.impacts.filter(row=>!finite(row.latitude)||!finite(row.longitude)).length;
+ const expected=detail.summary?.impactCount,actual=detail.impacts.length;
+ const status=finite(expected)&&expected!==actual?`衝撃${actual}件を取得（集計${expected}件。反映差があるため再取得します）`:`衝撃${actual}件を全件取得`;
+ return `${status}。${missing?`座標なし${missing}件は地図に表示できません。`:''}`;
 }
 const base=(window.DASHBOARD_CONFIG?.apiBaseUrl??'').replace(/\/$/,'');
 const cloudMode=window.DASHBOARD_CONFIG?.deployment==='aws'||/^https:\/\/[^/]+\.execute-api\.[^/]+\.amazonaws\.com/.test(base);
@@ -76,27 +104,28 @@ async function loadDelivery(id){
  }finally{if(token===state.loadToken){state.detailBusy=false;renderDetail();}}
 }
 function renderDetail(preserveMap=false){
- const detail=state.detail,summary=detail?.summary,rows=detail?.measurements??[];
+ const detail=state.detail,summary=detail?.summary,rows=detail?.measurements??[],shown=displayRows(detail);
  set('selected-delivery',detail?.deliveryId??state.selectedId??'配送データがありません');
  set('delivery-subtitle',rows.length?`${datetime(rows[0].measuredAt)} – ${time(rows.at(-1).measuredAt)} JST / ${number(rows.length,0)}件${detail?.sampling==='uniform'?'を全区間から抽出':'を取得'}`:state.selectedId?'計測データを読み込み中、または未取得です。':'左の配送一覧から選択してください。');
  const versions=[...new Set(rows.map(row=>row.algorithmVersion))];set('algorithm',versions.length?versions.join(' / '):'解析バージョン未受領');
  set('avg-score',number(summary?.avgScore,1));$('score-meter').style.width=`${Math.max(0,Math.min(100,summary?.avgScore??0))}%`;
  set('impact-count',number(summary?.impactCount,0));set('impact-subtitle',summary?'配送全体の集計値':'集計データ未受領');
- set('max-tilt',number(summary?.maxTilt,1));set('sample-count',number(summary?.sampleCount,0));set('available-count',`表示可能な計測：${number(rows.length,0)}件`);
- set('visible-impacts',`${rows.filter(row=>row.isImpact).length}回`);
- const vibrations=rows.map(row=>row.vibration).filter(finite);set('visible-vibration',vibrations.length?number(vibrations.reduce((max,value)=>Math.max(max,value),-Infinity),2):'—');
- const positions=rows.filter(row=>finite(row.latitude)&&finite(row.longitude));set('gps-count',`${positions.length} / ${rows.length}件`);set('low-gps-count',`${positions.filter(row=>finite(row.accuracyMeters)&&row.accuracyMeters>50).length}件`);set('updated-at',datetime(summary?.updatedAt));
+ set('max-tilt',number(summary?.maxTilt,1));set('sample-count',number(summary?.sampleCount,0));set('available-count',`表示可能な計測：${number(shown.length,0)}件`);
+ set('visible-impacts',`${displayRows(detail).filter(row=>row.isImpact).length}回`);
+ const vibrations=shown.map(row=>row.vibration).filter(finite);set('visible-vibration',vibrations.length?number(vibrations.reduce((max,value)=>Math.max(max,value),-Infinity),2):'—');
+ const positions=shown.filter(row=>finite(row.latitude)&&finite(row.longitude));set('gps-count',`${positions.length} / ${shown.length}件`);set('low-gps-count',`${positions.filter(row=>finite(row.accuracyMeters)&&row.accuracyMeters>50).length}件`);set('updated-at',datetime(summary?.updatedAt));
  const total=summary?.sampleCount??detail?.total;
  let note=detail?`集計${number(total,0)}件 / 計測${rows.length}件を読み込み済み。グラフ・軌跡は読み込み済みの範囲を表示します。`:'配送を選択してください。';
- if(detail?.sampling==='uniform')note=`集計${number(detail.total,0)}件 / 先頭・末尾を含め、最大50の時間帯から合計最大500件を取得。空の時間帯がある場合などは500件未満になります。グラフ・軌跡・一覧は取得した計測を表示し、取得されない衝撃もあります。集計値は配送全体の値です。`;
+ if(detail?.sampling==='uniform')note=`集計${number(detail.total,0)}件 / 先頭・末尾を含め、最大50の時間帯から合計最大500件を取得。空の時間帯がある場合などは500件未満になります。軌跡は抽出した計測を表示します。衝撃は別途全件を取得します。集計値は配送全体の値です。`;
  set('loaded-info',detail?.sampling==='uniform'?`全区間から${rows.length}件を抽出`:`計測${rows.length}件を読み込み済み${detail?.nextToken?'・続きがあります':''}`);$('more-measurements').hidden=!detail?.nextToken;$('more-measurements').disabled=state.detailBusy;
  if(modeLabel()==='取り込み＋架空データ')note+=' 取り込みデータと架空サンプルが混在しています。';
- set('coverage-note',note);renderChart('vibration-chart',rows,'vibration','#348e74');renderChart('tilt-chart',rows,'tiltDegrees','#7897a3');renderRecords();renderMap(preserveMap||state.mapMode==='all');
+ if(detail)note+=' '+impactCoverage(detail);
+ set('coverage-note',note);const chartRows=displayRows(detail);renderChart('vibration-chart',chartRows,'vibration','#348e74');renderChart('tilt-chart',chartRows,'tiltDegrees','#7897a3');renderRecords();renderMap(preserveMap||state.mapMode==='all');
 }
 function renderChart(id,rows,key,color){
  const area=$(id);area.replaceChildren();if(!rows.length||!rows.some(row=>finite(row[key]))){area.innerHTML='<div class="empty-state">表示できる計測がありません。</div>';return;}
  const stride=Math.max(1,Math.ceil(rows.length/800));const displayed=rows.filter((row,i)=>i%stride===0||row.isImpact||i===rows.length-1);
- const values=displayed.map(row=>row[key]).filter(finite),max=Math.max(1,...values)*1.12,min=Math.min(0,...values),range=max-min||1;
+ const values=displayed.map(row=>row[key]).filter(finite),max=values.reduce((a,b)=>Math.max(a,b),1)*1.12,min=values.reduce((a,b)=>Math.min(a,b),0),range=max-min||1;
  const start=Date.parse(rows[0].measuredAt),end=Date.parse(rows.at(-1).measuredAt),duration=Math.max(1000,end-start);
  const width=540,height=170,left=35,right=15,top=12,bottom=27;
  const x=row=>left+(Date.parse(row.measuredAt)-start)/duration*(width-left-right),y=value=>top+(max-value)/range*(height-top-bottom);
@@ -157,8 +186,8 @@ function renderMapMode(){
  const all=state.mapMode==='all';
  for(const [id,active]of [['map-selected',!all],['map-all',all]]){$(id).classList.toggle('active',active);$(id).setAttribute('aria-pressed',String(active));}
  set('map-description',all?'地図は全配送、スコア・グラフ・明細は選択中の配送を表示':'軌跡は選択した配送、区画は全配送の集計');
- const gps=state.allMapDetails.filter(detail=>detail.measurements.some(row=>finite(row.latitude)&&finite(row.longitude))).length;
- set('map-status',all?(state.allMapBusy?state.allMapProgress:state.allMapError||`${state.allMapDetails.length}配送を取得・GPSあり${gps}配送。各配送は最大500件の抽出軌跡です。${state.allMapDetails.length&&!gps?'表示できるGPS座標がありません。':''}`):'選択中の配送の軌跡を表示しています。');
+ const gps=state.allMapDetails.filter(detail=>displayRows(detail).some(row=>finite(row.latitude)&&finite(row.longitude))).length;
+ set('map-status',all?(state.allMapBusy?state.allMapProgress:state.allMapError||`${state.allMapDetails.length}配送を取得・GPSあり${gps}配送。各配送は最大500件の抽出軌跡と取得した衝撃を表示します。${state.allMapDetails.reduce((n,detail)=>n+(detail.impacts??[]).filter(row=>!finite(row.latitude)||!finite(row.longitude)).length,0)}件の衝撃は座標がありません。${state.allMapDetails.some(detail=>detail.impactError)?'衝撃の全件取得に失敗した配送があります。':''}${state.allMapDetails.some(detail=>detail.impacts&&finite(detail.summary?.impactCount)&&detail.impacts.length!==detail.summary.impactCount)?'衝撃の集計と取得件数に反映差があります。':''}${state.allMapDetails.length&&!gps?'表示できるGPS座標がありません。':''}`):`選択中の配送の軌跡を表示しています。${impactCoverage(state.detail)}`);
  $('map').setAttribute('aria-busy',String(all&&state.allMapBusy));
 }
 async function setMapMode(mode){
@@ -215,11 +244,13 @@ function renderMap(preserveView=false){
  const rows=detail.measurements,color=all?deliveryColor(detail.deliveryId):'#238267';let segment=[];const finish=()=>{if(segment.length>1)L.polyline(segment,{color,weight:detail.deliveryId===state.selectedId?4:3,opacity:.8}).bindPopup(popup(detail.deliveryId,[`取得した計測：${rows.length}件`,'各配送の軌跡を個別に表示しています。'])).addTo(overlay);segment=[];};
  for(const row of rows){if(!finite(row.latitude)||!finite(row.longitude)){finish();continue;}const point=[row.latitude,row.longitude];segment.push(point);fitBounds.extend(point);}
  finish();
- const usable=rows.filter(row=>finite(row.latitude)&&finite(row.longitude));
+ const usable=displayRows(detail).filter(row=>finite(row.latitude)&&finite(row.longitude));
+ for(const row of usable)fitBounds.extend([row.latitude,row.longitude]);
  hasPositions||=usable.length>0;
  const stride=Math.max(1,Math.ceil(usable.length/800));
  usable.forEach((row,i)=>{if(all&&!row.isImpact&&i!==0&&i!==usable.length-1)return;if(i%stride!==0&&!row.isImpact&&i!==usable.length-1)return;const marker=L.circleMarker([row.latitude,row.longitude],{radius:row.isImpact?6:2.5,color:row.isImpact?'#c5644c':color,weight:row.isImpact?2:1,fillColor:row.isImpact?'#dd765e':color,fillOpacity:finite(row.accuracyMeters)&&row.accuracyMeters>50?.25:.9}).bindPopup(popup(detail.deliveryId,[row.measurementId,`${time(row.measuredAt)} JST / ${row.isImpact?'衝撃あり':'衝撃なし'}`,`スコア ${number(row.qualityScore,1)} / 振動 ${number(row.vibration,2)}`,`傾斜 ${number(row.tiltDegrees,1)}° / GPS精度 ${number(row.accuracyMeters,1)}m`])).addTo(overlay);if(detail.deliveryId===state.selectedId)recordMarkers.set(row.measurementId,marker);});
- if(usable.length){L.marker([usable[0].latitude,usable[0].longitude],{icon:L.divIcon({className:'map-start',html:'S',iconSize:[21,21]})}).bindPopup(popup(detail.deliveryId,['取得した軌跡の先頭'])).addTo(overlay);}
+ const trackPositions=rows.filter(row=>finite(row.latitude)&&finite(row.longitude));
+ if(trackPositions.length){L.marker([trackPositions[0].latitude,trackPositions[0].longitude],{icon:L.divIcon({className:'map-start',html:'S',iconSize:[21,21]})}).bindPopup(popup(detail.deliveryId,['取得した軌跡の先頭'])).addTo(overlay);}
  }
  for(const cell of state.cells){
   const bounds=cellBounds(cell),layer=L.rectangle(bounds,cellHeatStyle(cell)).bindPopup(popup(cell.cellId,[`区画平均スコア：${cellScoreLabel(cell)}`,`平均振動：${number(cell.avgVibration,2)}m/s²`,`測定 ${cell.sampleCount}件 / 衝撃 ${cell.impactCount}回`,`状態：${cellState(cell.evalStatus)}`,`全配送の集計 / ${datetime(cell.updatedAt)} JST`])).addTo(overlay);
@@ -229,7 +260,7 @@ function renderMap(preserveView=false){
  updateMapNote();
 }
 function renderRecords(){
- $('records-body').replaceChildren();const rows=(state.detail?.measurements??[]).filter(row=>!state.eventsOnly||row.isImpact),size=15,totalPages=Math.max(1,Math.ceil(rows.length/size));state.page=Math.min(state.page,totalPages-1);
+ $('records-body').replaceChildren();const rows=displayRows(state.detail).filter(row=>!state.eventsOnly||row.isImpact),size=15,totalPages=Math.max(1,Math.ceil(rows.length/size));state.page=Math.min(state.page,totalPages-1);
  for(const row of rows.slice(state.page*size,(state.page+1)*size)){
   const tr=document.createElement('tr');tr.tabIndex=0;tr.setAttribute('aria-label',`${time(row.measuredAt)}の計測位置を確認`);
   for(const val of [time(row.measuredAt),number(row.qualityScore,1),number(row.vibration,2),finite(row.tiltDegrees)?`${number(row.tiltDegrees,1)}°`:'未取得',row.isImpact?'衝撃あり':'なし',finite(row.accuracyMeters)?`${number(row.accuracyMeters,1)}m`:'未取得',row.measurementId]){const td=document.createElement('td');td.textContent=val;tr.append(td);}

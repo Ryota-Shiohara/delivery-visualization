@@ -14,11 +14,12 @@ async function route(pathname,params){
  if(mode!=='dynamodb')throw new Error('DATA_MODEはdemo、c-example、dynamodbのいずれかにしてください。');
  const names={analysis:process.env.ANALYSIS_TABLE,summaries:process.env.SUMMARY_TABLE,cells:process.env.CELL_TABLE};
  const indexName=process.env.ANALYSIS_INDEX??'DeliveryTimeIndex',maxPageItems=Number(process.env.MAX_PAGE_ITEMS??1000);
- const signature=JSON.stringify({names,indexName,maxPageItems});
+ const impactIndexName=process.env.IMPACT_INDEX??'ImpactDeliveryTimeIndex';
+ const signature=JSON.stringify({names,indexName,impactIndexName,maxPageItems});
  if(!reader||configuration!==signature){
   const {DynamoDBClient,ScanCommand,QueryCommand,GetItemCommand}=await import('@aws-sdk/client-dynamodb');
   const client=new DynamoDBClient({});
-  reader=createDynamoReader({names,indexName,maxPageItems,scan:input=>client.send(new ScanCommand(input)),query:input=>client.send(new QueryCommand(input)),get:input=>client.send(new GetItemCommand(input))});
+  reader=createDynamoReader({names,indexName,impactIndexName,maxPageItems,scan:input=>client.send(new ScanCommand(input)),query:input=>client.send(new QueryCommand(input)),get:input=>client.send(new GetItemCommand(input))});
   configuration=signature;
  }
  return reader(pathname,params);

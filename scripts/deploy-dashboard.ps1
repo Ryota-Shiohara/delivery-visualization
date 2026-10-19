@@ -13,6 +13,8 @@ param(
     [int]$MaxPageItems = 1000,
     [ValidatePattern('^[A-Za-z0-9_.-]{3,255}$')]
     [string]$AnalysisIndexName = 'DeliveryTimeIndex',
+    [ValidatePattern('^[A-Za-z0-9_.-]{3,255}$')]
+    [string]$ImpactIndexName = 'ImpactDeliveryTimeIndex',
     [string]$Profile,
     [string]$EnvFile,
     [string]$Region,
@@ -84,26 +86,26 @@ function Read-StackOutputs {
     return $values
 }
 function Wait-AnalysisIndex {
-    param([string]$TableName)
+    param([string]$TableName, [string]$IndexName = $AnalysisIndexName, [string]$HashKey = 'deliveryId')
     $timer = [Diagnostics.Stopwatch]::StartNew()
     for ($attempt = 1; $attempt -le 120; $attempt++) {
         $description = Read-AwsJson -Arguments @('dynamodb', 'describe-table', '--table-name', $TableName)
         $indexes = if ($description.Table.PSObject.Properties['GlobalSecondaryIndexes']) { @($description.Table.GlobalSecondaryIndexes) } else { @() }
-        $index = @($indexes | Where-Object { $_.IndexName -eq $AnalysisIndexName })
-        if ($index.Count -ne 1) { throw "解析結果テーブルに${AnalysisIndexName}が必要です。Cのinfra/analysis.yamlを先に更新してください。" }
+        $index = @($indexes | Where-Object { $_.IndexName -eq $IndexName })
+        if ($index.Count -ne 1) { throw "解析結果テーブルに${IndexName}が必要です。Cのinfra/analysis.yamlを先に更新してください。" }
         if ($index[0].IndexStatus -eq 'ACTIVE') {
             $keys = @($index[0].KeySchema)
-            if (@($keys | Where-Object { $_.AttributeName -eq 'deliveryId' -and $_.KeyType -eq 'HASH' }).Count -ne 1 -or @($keys | Where-Object { $_.AttributeName -eq 'measuredAt' -and $_.KeyType -eq 'RANGE' }).Count -ne 1 -or $index[0].Projection.ProjectionType -ne 'ALL') {
-                throw '索引のキーはdeliveryId/measuredAt、ProjectionはALLにしてください。'
+            if (@($keys | Where-Object { $_.AttributeName -eq $HashKey -and $_.KeyType -eq 'HASH' }).Count -ne 1 -or @($keys | Where-Object { $_.AttributeName -eq 'measuredAt' -and $_.KeyType -eq 'RANGE' }).Count -ne 1 -or $index[0].Projection.ProjectionType -ne 'ALL') {
+                throw "索引のキーは$HashKey/measuredAt、ProjectionはALLにしてください。"
             }
-            Write-Host "$AnalysisIndexName はACTIVEです。dashboardの構築を続けます。"
+            Write-Host "$IndexName はACTIVEです。dashboardの構築を続けます。"
             return
         }
         if ($index[0].IndexStatus -notin @('CREATING', 'UPDATING')) { throw '索引が利用できる状態ではありません。' }
         if ($attempt -eq 120) { throw '索引の準備待ちがタイムアウトしました。ACTIVEになってから再実行してください。' }
         if (($attempt - 1) % 6 -eq 0) {
             $elapsedSeconds = [int][Math]::Floor($timer.Elapsed.TotalSeconds)
-            Write-Host "$AnalysisIndexName の作成完了を待っています。Table=$TableName Status=$($index[0].IndexStatus) 経過=${elapsedSeconds}秒 確認=$attempt/120"
+            Write-Host "$IndexName の作成完了を待っています。Table=$TableName Status=$($index[0].IndexStatus) 経過=${elapsedSeconds}秒 確認=$attempt/120"
         }
         Start-Sleep -Seconds 5
     }
@@ -128,6 +130,7 @@ if ($TableMode -eq 'existing') {
         if ($table.Table.TableStatus -ne 'ACTIVE') { throw "$name がACTIVEではありません。" }
     }
     Wait-AnalysisIndex -TableName $AnalysisTableName
+    Wait-AnalysisIndex -TableName $AnalysisTableName -IndexName $ImpactIndexName -HashKey 'impactDeliveryId'
 }
 if (-not $PSCmdlet.ShouldProcess("$($identity.Account)/$Region/$StackName", 'Create/update D resources and publish dashboard')) { return }
 # パッケージ作成で失敗したらAWSへの書き込みを開始しない。
@@ -151,14 +154,17 @@ try {
         DashboardBucketName = $storage.DashboardBucketName; ArtifactBucketName = $storage.ArtifactBucketName
         LambdaCodeKey = $codeKey; TableMode = $TableMode
         AnalysisTableName = [string]$AnalysisTableName; SummaryTableName = [string]$SummaryTableName; CellTableName = [string]$CellTableName
-        MaxPageItems = [string]$MaxPageItems; AnalysisIndexName = $AnalysisIndexName
+        MaxPageItems = [string]$MaxPageItems; AnalysisIndexName = $AnalysisIndexName; ImpactIndexName = $ImpactIndexName
     }
     $parameterList = @($parameters.GetEnumerator() | Sort-Object Name | ForEach-Object { @{ ParameterKey = $_.Key; ParameterValue = $_.Value } })
     $parameterFile = Join-Path $workRoot 'parameters.json'
     Write-Utf8File -Path $parameterFile -Content (ConvertTo-Json -InputObject $parameterList -Depth 5)
     Invoke-DashboardAws -Arguments @('cloudformation', 'deploy', '--template-file', (Join-Path $repoRoot 'infra\dashboard.yaml'), '--stack-name', $backendStack, '--parameter-overrides', "file://$parameterFile", '--no-fail-on-empty-changeset') | Out-Host
     $backend = Read-StackOutputs -Name $backendStack
-    if ($TableMode -eq 'prototype') { Wait-AnalysisIndex -TableName $backend.AnalysisTableName }
+    if ($TableMode -eq 'prototype') {
+        Wait-AnalysisIndex -TableName $backend.AnalysisTableName
+        Wait-AnalysisIndex -TableName $backend.AnalysisTableName -IndexName $ImpactIndexName -HashKey 'impactDeliveryId'
+    }
     if ($TableMode -eq 'prototype' -and -not $SkipSampleData) {
         foreach ($sample in @(
             @{ Name = 'analysis'; Table = $backend.AnalysisTableName; Key = 'measurementId' },

@@ -8,6 +8,7 @@ Cのanalysis / summaries / cellsのフィールド名・データ形式は維持
 | --- | --- |
 | /api/deliveries | summaryテーブルのみから配送一覧を1ページ取得 |
 | /api/deliveries/{deliveryId} | summaryをGetItemし、analysisのDeliveryTimeIndexをQuery |
+| /api/deliveries/{deliveryId}?impacts=only | 衝撃専用GSIをQueryし、衝撃だけをページ取得 |
 | /api/cells | cellテーブルのみから区画一覧を1ページ取得 |
 | /api/health | 設定とプロセスの応答確認。DBを全件取得しない |
 
@@ -28,3 +29,5 @@ Cのanalysis / summaries / cellsのフィールド名・データ形式は維持
 ## ローカル操作
 
 PC内のJSON取り込み・サンプル切替・書き出し用APIは維持。これらのPOSTはAWSへ移さない。公開画面は配送モニターと路面区画の2画面とし、開発用データ連携タブを削除する。
+
+衝撃専用取得では `ImpactDeliveryTimeIndex`（impactDeliveryId / measuredAt）を使用する。`impacts=only` と `sampling` は併用不可。通常計測のcursorとも混用不可。応答に `impacts: "only"` を追加し、`total` は配送集計のimpactCount（未受領はnull）となる。画面は抽出計測に加えて衝撃の全ページを取得し、座標のある衝撃を全件表示する。座標なし・取得失敗・集計件数との反映差は表示する。

@@ -14,6 +14,7 @@ $global:dTestFailDeploy = $false
 $global:dTestBadCors = $false
 $global:dTestStackName = 'd-test'
 $global:dTestMissingIndex = $false
+$global:dTestMissingImpact = $false
 function Assert {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
@@ -48,7 +49,8 @@ function aws {
     }
     if ($call[1] -eq 'describe-table') {
         if ($global:dTestMissingIndex) { return '{"Table":{"TableStatus":"ACTIVE"}}' }
-        return '{"Table":{"TableStatus":"ACTIVE","GlobalSecondaryIndexes":[{"IndexName":"DeliveryTimeIndex","IndexStatus":"ACTIVE","KeySchema":[{"AttributeName":"deliveryId","KeyType":"HASH"},{"AttributeName":"measuredAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]}}'
+        if ($global:dTestMissingImpact) { return '{"Table":{"TableStatus":"ACTIVE","GlobalSecondaryIndexes":[{"IndexName":"DeliveryTimeIndex","IndexStatus":"ACTIVE","KeySchema":[{"AttributeName":"deliveryId","KeyType":"HASH"},{"AttributeName":"measuredAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]}}' }
+        return '{"Table":{"TableStatus":"ACTIVE","GlobalSecondaryIndexes":[{"IndexName":"DeliveryTimeIndex","IndexStatus":"ACTIVE","KeySchema":[{"AttributeName":"deliveryId","KeyType":"HASH"},{"AttributeName":"measuredAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}},{"IndexName":"ImpactDeliveryTimeIndex","IndexStatus":"ACTIVE","KeySchema":[{"AttributeName":"impactDeliveryId","KeyType":"HASH"},{"AttributeName":"measuredAt","KeyType":"RANGE"}],"Projection":{"ProjectionType":"ALL"}}]}}'
     }
     if ($call[0] -eq 'cloudformation' -and $call[1] -eq 'deploy') {
         if ($global:dTestFailDeploy) { $global:LASTEXITCODE = 1; return }
@@ -96,6 +98,7 @@ function Reset-Case {
     $global:dTestMode = 'prototype'; $global:dTestExistingMode = ''; $global:dTestSeedExists = $false
     $global:dTestFailDeploy = $false; $global:dTestBadCors = $false
     $global:dTestMissingIndex = $false
+    $global:dTestMissingImpact = $false
     $global:dTestStackName = 'd-test-' + $Name + '-' + ([guid]::NewGuid().ToString('N').Substring(0, 6))
 }
 function Invoke-TestDeploy {
@@ -140,11 +143,15 @@ try {
     Reset-Case existing
     $global:dTestMode = 'existing'
     Invoke-TestDeploy @{ TableMode = 'existing'; AnalysisTableName = 'c-analysis'; SummaryTableName = 'c-summary'; CellTableName = 'c-cell' } | Out-Null
-    Assert ((Count-Calls describe-table) -eq 4 -and (Count-Calls put-item) -eq 0 -and (Count-Calls get-item) -eq 0) 'Existing mode did not preserve C data/check index.'
+    Assert ((Count-Calls describe-table) -eq 5 -and (Count-Calls put-item) -eq 0 -and (Count-Calls get-item) -eq 0) 'Existing mode did not preserve C data/check index.'
     Reset-Case missingindex
     $global:dTestMode = 'existing'; $global:dTestMissingIndex = $true
     Expect-Failure @{ TableMode = 'existing'; AnalysisTableName = 'c-analysis'; SummaryTableName = 'c-summary'; CellTableName = 'c-cell' } '*DeliveryTimeIndexが必要*'
     Assert ((Count-Calls deploy) -eq 0) 'Missing index caused deployment.'
+    Reset-Case missingimpact
+    $global:dTestMode = 'existing'; $global:dTestMissingImpact = $true
+    Expect-Failure @{ TableMode = 'existing'; AnalysisTableName = 'c-analysis'; SummaryTableName = 'c-summary'; CellTableName = 'c-cell' } '*ImpactDeliveryTimeIndexが必要*'
+    Assert ((Count-Calls deploy) -eq 0) 'Missing impact index caused deployment.'
     Reset-Case replay
     $global:dTestSeedExists = $true
     Invoke-TestDeploy @{ TableMode = 'prototype' } | Out-Null
@@ -160,7 +167,7 @@ try {
     $global:dTestBadCors = $true
     Expect-Failure @{ TableMode = 'prototype' } '*CORS応答が一致*'
     Assert (-not (Test-Path -LiteralPath (Join-Path $repoRoot ".local\d-deploy\$($global:dTestStackName)\result.json"))) 'Failed deployment wrote success record.'
-    Write-Host 'PASS: 12 deployment scenarios; AWS CLI and HTTPS entirely mocked.'
+    Write-Host 'PASS: 13 deployment scenarios; AWS CLI and HTTPS entirely mocked.'
 } finally {
-    Remove-Variable -Scope Global -Name dTestCalls,dTestHttp,dTestMode,dTestExistingMode,dTestSeedExists,dTestFailDeploy,dTestBadCors,dTestStackName,dTestMissingIndex
+    Remove-Variable -Scope Global -Name dTestCalls,dTestHttp,dTestMode,dTestExistingMode,dTestSeedExists,dTestFailDeploy,dTestBadCors,dTestStackName,dTestMissingIndex,dTestMissingImpact
 }

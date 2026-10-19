@@ -93,3 +93,28 @@ CloudFormationなどのAWS CLIコマンドも同じ `.env` を使うには、`aw
 deploy-dashboard.ps1はDのS3配信・HTTP API・参照Lambdaを構築して画面を公開します。既存のCテーブル接続または仮テーブル作成を選べます。認証はaws-with-env.ps1を共用します。[実行手順](../docs/deployment/d-dashboard-automated.md)とscripts/tests/dashboard-deploy.test.ps1を参照。WhatIf指定時はAWS通信・ローカル生成を行いません。
 
 配送単位のQuery・ページ取得・UI整理とCの索引追加は [既存環境の更新手順](../docs/deployment/d-query-index-upgrade.md) を参照してください。
+
+## 過去の衝撃レコードにGSI用属性を一括付与する
+
+`backfill-impact-index.ps1` は既定で `.local/deploy-all/result.json` の `AnalysisTableName`・`Region`・`AccountId` を読み、ルートの `.env` で認証します。3テーブルのうち解析結果のみを対象にし、集計テーブルは変更しません。PowerShell 7で検証しています。
+
+```powershell
+# AWSを読み取り、更新対象件数を確認する（書き込まない）
+pwsh -NoProfile -File scripts/backfill-impact-index.ps1
+
+# isImpact=true の過去レコードに impactDeliveryId=deliveryId を追加する
+pwsh -NoProfile -File scripts/backfill-impact-index.ps1 -Apply
+
+# 別の構築結果ファイルを使う
+pwsh -NoProfile -File scripts/backfill-impact-index.ps1 -ResultFile '<result.jsonのパス>'
+```
+
+全ページを順次Scanします。通常レコードと付与済みレコードは更新せず、属性が不足した衝撃は `Invalid` に計上します。位置情報・レコードIDはログに出しません。スキャンはテーブル全体を読むため、その分の読み取り料金が発生します。
+
+更新直前にも衝撃判定・配送ID・計測日時・索引用属性の未付与を条件式で確認します。同時更新などによる条件不一致やAWSエラーでは停止します。完了済みの更新は保持され、再実行すると付与済みをスキップします。異なる索引用属性が既にある場合は上書きせず停止します。Scan全体はスナップショットではないため、計測停止後の実行が確実です。
+
+これは**索引用属性の補完のみ**です。GSIの作成、Lambda・画面のデプロイ、新規計測への属性追加は行いません。衝撃専用GSIはパーティションキー `impactDeliveryId`（S）、ソートキー `measuredAt`（S）で別途作成します。既存の `DeliveryTimeIndex` は変更しません。
+
+AWS通信なしの検証：`pwsh -NoProfile -File scripts/tests/impact-backfill.test.ps1`。
+
+更新は最大10件ずつの条件付きトランザクションで実行します。各まとまりは全件成功か全件失敗となり、成功済みのまとまりは保持されます。通常の書き込みより書き込み容量を使います。[AWSの条件付き一括更新](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/BestPractices_ConditionalBatchUpdate.html)を参照してください。

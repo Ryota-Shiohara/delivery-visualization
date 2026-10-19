@@ -15,3 +15,11 @@ AWSでは配送一覧をsummaryだけから取得し、配送詳細はDeliveryTi
 環境変数：DATA_MODE、ANALYSIS_TABLE、SUMMARY_TABLE、CELL_TABLE、ANALYSIS_INDEX（標準DeliveryTimeIndex）、MAX_PAGE_ITEMS（標準1000）。LambdaのNode.jsランタイム内SDKを使用する。scripts/package-d-aws.ps1で7ファイルをZIPにまとめる。
 
 [反映手順](../../docs/deployment/d-query-index-upgrade.md)と[API仕様](../../contracts/d-query-prototype.md)を参照。索引不足は503、入力不正は400、DB権限などの失敗は500。索引はACTIVEになってから使う。
+
+## 衝撃地点を全件取得する
+
+軌跡の抽出とは別に `GET /api/deliveries/{deliveryId}?impacts=only&limit=500` を使用します。応答の `measurements` は衝撃のみ、`total` は配送集計の衝撃件数、`nextToken` は衝撃専用の続き情報です。`sampling` との併用と、通常計測のcursorとの混用は400です。
+
+AWSでは `ImpactDeliveryTimeIndex`（`impactDeliveryId` / `measuredAt`、Projection ALL）をQueryし、通常計測の全件Scanは行いません。`IMPACT_INDEX` で索引名を変更できます。画面は衝撃の全ページを取得して重複を除き、選択中・全配送の地図、タイムライン、明細に反映します。軌跡の線は抽出計測のままにし、衝撃の補完点を軌跡に結びません。
+
+座標なしの衝撃は明細・件数に残し、地図に表示できない件数を案内します。衝撃の取得失敗や集計との件数差を表示し、再取得します。衝撃取得に失敗しても抽出軌跡は利用できます。GSIの非同期反映による一時的な差は許容します。
