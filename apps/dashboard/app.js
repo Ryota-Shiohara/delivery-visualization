@@ -98,9 +98,36 @@ function renderChart(id,rows,key,color){
  area.append(svg);area.setAttribute('aria-label',`${key}のグラフ。${rows.length}件中${displayed.length}点を描画。衝撃は間引かず表示。`);
 }
 function cellState(value){return value==='evaluated'?'評価済み':value==='reference'||value==='demo_insufficient'?'参考値':value;}
+// CのCELL_SIZE=0.0005度と同じ区画。密度や測定回数による重み付けはしない。
+const CELL_SIZE=0.0005;
+let heatmapOpacity=.35,heatmapLayers=[];
+function cellScore(cell){return finite(cell.avgScore)&&cell.avgScore>=0&&cell.avgScore<=100?cell.avgScore:null;}
+function cellScoreLabel(cell){const score=cellScore(cell);return score===null?'未取得':`${number(score,1)} / 100`;}
+function heatmapColor(score){
+ const stops=[[198,66,58],[241,193,75],[23,137,143]],index=score<=50?0:1,t=(score-index*50)/50;
+ return '#'+stops[index].map((value,i)=>Math.round(value+(stops[index+1][i]-value)*t).toString(16).padStart(2,'0')).join('');
+}
+function cellHeatStyle(cell){
+ const score=cellScore(cell),reference=cell.evalStatus!=='evaluated';
+ return {pane:'cell-heatmap',color:score===null?'#737b80':heatmapColor(score),weight:1,opacity:heatmapOpacity===0?0:.65,
+  fillColor:score===null?'#737b80':heatmapColor(score),fillOpacity:score===null?heatmapOpacity*.2:heatmapOpacity,
+  dashArray:score===null||reference?'4 3':undefined};
+}
+function cellBounds(cell){const half=CELL_SIZE/2;return [[cell.centerLat-half,cell.centerLon-half],[cell.centerLat+half,cell.centerLon+half]];}
+function updateHeatmapOpacity(value){
+ const percent=Number(value);if(!Number.isFinite(percent))return;
+ heatmapOpacity=Math.max(0,Math.min(75,percent))/100;
+ set('heatmap-opacity-value',`${Math.round(heatmapOpacity*100)}%`);
+ for(const {layer,cell}of heatmapLayers)layer.setStyle(cellHeatStyle(cell));
+}
+function updateMapNote(){
+ const missing=state.cells.filter(cell=>cellScore(cell)===null).length;
+ set('map-note',`${$('basemap').checked?'背景地図：OpenStreetMap。':'座標プレビュー：背景地図なし。'} 全配送の区画平均スコアを表示（高いほど高評価）。破線は参考値・未取得。読み込み済み${state.cells.length}区画${state.cellsCursor?'・続きあり':''}、スコア未取得${missing}区画。架空データは実際の路面状態を示しません。`);
+}
 function popup(title,lines){const container=document.createElement('div');container.className='map-popup';const heading=document.createElement('strong');heading.textContent=title;container.append(heading);for(const line of lines){const p=document.createElement('p');p.textContent=line;container.append(p);}return container;}
 function initializeMap(){
  map=L.map('map',{zoomControl:true,attributionControl:true,preferCanvas:true}).setView([35.5556,139.657],16);map.attributionControl.setPrefix('Leaflet');
+ map.createPane('cell-heatmap').style.zIndex='350';
  const Grid=L.GridLayer.extend({createTile(coords){const tile=document.createElement('div');tile.className='coordinate-grid coordinate-tile';const latLng=map.unproject(L.point(coords.x*256,coords.y*256),coords.z);tile.textContent=`${latLng.lat.toFixed(4)}, ${latLng.lng.toFixed(4)}`;return tile;}});
  grid=new Grid({tileSize:256,attribution:'座標プレビュー / 背景地図なし'}).addTo(map);overlay=L.layerGroup().addTo(map);
  $('fit-map').addEventListener('click',()=>{map.invalidateSize();if(fitBounds?.isValid())map.fitBounds(fitBounds,{padding:[30,30],maxZoom:17});});
@@ -108,8 +135,9 @@ function initializeMap(){
   if($('basemap').checked){
    tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a> contributors'});
    let warned=false;tiles.on('tileerror',()=>{if(!warned){warned=true;toast('背景地図を取得できません。チェックを外すと座標プレビューに戻れます。');}});
-   grid.remove();tiles.addTo(map);set('map-note','背景地図はOpenStreetMapから取得します。架空の軌跡は実際の道路や路面状態を示しません。');
-  }else{tiles?.remove();grid.addTo(map);set('map-note','座標プレビュー：背景地図なしでも操作できます。区画は中心点で表示します。');}
+   grid.remove();tiles.addTo(map);
+  }else{tiles?.remove();grid.addTo(map);}
+  updateMapNote();
  });
 }
 function renderMapMode(){
@@ -158,7 +186,7 @@ async function loadAllMap(preserveView=false){
 function deliveryColor(id){let hash=0;for(const character of id)hash=(hash*31+character.codePointAt(0))>>>0;return ['#238267','#4267ac','#9865a6','#b47b26','#29888e','#a05c65'][hash%6];}
 function renderMap(preserveView=false){
  renderMapMode();
- if(!map)return;overlay.clearLayers();recordMarkers=new Map();selectedMarker=null;fitBounds=L.latLngBounds([]);
+ if(!map)return;overlay.clearLayers();heatmapLayers=[];recordMarkers=new Map();selectedMarker=null;fitBounds=L.latLngBounds([]);
  const all=state.mapMode==='all',details=all?state.allMapDetails:state.detail?[state.detail]:[];
  let hasPositions=false;
  for(const detail of details){
@@ -171,10 +199,12 @@ function renderMap(preserveView=false){
  usable.forEach((row,i)=>{if(all&&!row.isImpact&&i!==0&&i!==usable.length-1)return;if(i%stride!==0&&!row.isImpact&&i!==usable.length-1)return;const marker=L.circleMarker([row.latitude,row.longitude],{radius:row.isImpact?6:2.5,color:row.isImpact?'#c5644c':color,weight:row.isImpact?2:1,fillColor:row.isImpact?'#dd765e':color,fillOpacity:finite(row.accuracyMeters)&&row.accuracyMeters>50?.25:.9}).bindPopup(popup(detail.deliveryId,[row.measurementId,`${time(row.measuredAt)} JST / ${row.isImpact?'衝撃あり':'衝撃なし'}`,`スコア ${number(row.qualityScore,1)} / 振動 ${number(row.vibration,2)}`,`傾斜 ${number(row.tiltDegrees,1)}° / GPS精度 ${number(row.accuracyMeters,1)}m`])).addTo(overlay);if(detail.deliveryId===state.selectedId)recordMarkers.set(row.measurementId,marker);});
  if(usable.length){L.marker([usable[0].latitude,usable[0].longitude],{icon:L.divIcon({className:'map-start',html:'S',iconSize:[21,21]})}).bindPopup(popup(detail.deliveryId,['取得した軌跡の先頭'])).addTo(overlay);}
  }
- const displayedCells=state.cells.slice(0,500);
- for(const cell of displayedCells){const marker=L.circleMarker([cell.centerLat,cell.centerLon],{radius:Math.min(15,5+Math.sqrt(cell.sampleCount)),color:cell.evalStatus==='evaluated'?'#5b9294':'#99a39b',weight:1.4,fillColor:cell.evalStatus==='evaluated'?'#83b0ad':'#d9ddd5',fillOpacity:.28,dashArray:cell.evalStatus==='evaluated'?undefined:'4 3'}).bindPopup(popup(cell.cellId,[`平均振動：${number(cell.avgVibration,2)}m/s²`,`測定 ${cell.sampleCount}件 / 衝撃 ${cell.impactCount}回`,`状態：${cellState(cell.evalStatus)}`,`全配送の集計 / ${datetime(cell.updatedAt)} JST`])).addTo(overlay);if(!hasPositions)fitBounds.extend(marker.getLatLng());}
+ for(const cell of state.cells){
+  const bounds=cellBounds(cell),layer=L.rectangle(bounds,cellHeatStyle(cell)).bindPopup(popup(cell.cellId,[`区画平均スコア：${cellScoreLabel(cell)}`,`平均振動：${number(cell.avgVibration,2)}m/s²`,`測定 ${cell.sampleCount}件 / 衝撃 ${cell.impactCount}回`,`状態：${cellState(cell.evalStatus)}`,`全配送の集計 / ${datetime(cell.updatedAt)} JST`])).addTo(overlay);
+  heatmapLayers.push({layer,cell});if(!hasPositions)for(const point of bounds)fitBounds.extend(point);
+ }
  if(!preserveView){if(fitBounds.isValid())map.fitBounds(fitBounds,{padding:[32,32],maxZoom:17});else map.setView([35.5556,139.657],16);}
- if(state.cells.length>500)set('map-note',`地図は読み込み済みの先頭500区画を表示。区画一覧は読み込み済み${state.cells.length}件を表示します。`);
+ updateMapNote();
 }
 function renderRecords(){
  $('records-body').replaceChildren();const rows=(state.detail?.measurements??[]).filter(row=>!state.eventsOnly||row.isImpact),size=15,totalPages=Math.max(1,Math.ceil(rows.length/size));state.page=Math.min(state.page,totalPages-1);
@@ -192,11 +222,12 @@ function renderRecords(){
 function switchView(view){state.view=view;document.querySelectorAll('[data-view]').forEach(button=>button.classList.toggle('active',button.dataset.view===view));for(const v of ['monitor','roads'])$(`${v}-view`).hidden=v!==view;set('page-title',{monitor:'配送モニター',roads:'路面区画'}[view]);if(view==='monitor')setTimeout(()=>map.invalidateSize(),30);}
 function renderCells(){
  $('cells-body').replaceChildren();set('cell-count',`${state.cells.length}区画${state.cellsCursor?'+':''}`);set('cells-loaded-info',`${state.cells.length}区画を読み込み済み`);$('more-cells').hidden=!state.cellsCursor;
- for(const cell of state.cells){const tr=document.createElement('tr');for(const value of [cell.cellId,cell.sampleCount,number(cell.avgVibration,2),number(cell.maxVibration,2),cell.impactCount,cellState(cell.evalStatus),datetime(cell.updatedAt)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}const td=document.createElement('td'),button=document.createElement('button');button.className='button compact';button.textContent='地図で見る';button.addEventListener('click',()=>{switchView('monitor');setTimeout(()=>{map.setView([cell.centerLat,cell.centerLon],17);L.popup().setLatLng([cell.centerLat,cell.centerLon]).setContent(popup(cell.cellId,[`平均振動 ${number(cell.avgVibration,2)} / ${cell.sampleCount}件`,`状態：${cellState(cell.evalStatus)}`])).openOn(map);},50);});td.append(button);tr.append(td);$('cells-body').append(tr);}
- if(!state.cells.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=8;td.className='empty-row';td.textContent='GPS区画の集計データがありません。';tr.append(td);$('cells-body').append(tr);}
+ for(const cell of state.cells){const tr=document.createElement('tr');for(const value of [cell.cellId,cell.sampleCount,cellScoreLabel(cell),number(cell.avgVibration,2),number(cell.maxVibration,2),cell.impactCount,cellState(cell.evalStatus),datetime(cell.updatedAt)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}const td=document.createElement('td'),button=document.createElement('button');button.className='button compact';button.textContent='地図で見る';button.addEventListener('click',()=>{switchView('monitor');setTimeout(()=>{map.setView([cell.centerLat,cell.centerLon],17);L.popup().setLatLng([cell.centerLat,cell.centerLon]).setContent(popup(cell.cellId,[`区画平均スコア：${cellScoreLabel(cell)}`,`平均振動 ${number(cell.avgVibration,2)} / ${cell.sampleCount}件`,`状態：${cellState(cell.evalStatus)}`])).openOn(map);},50);});td.append(button);tr.append(td);$('cells-body').append(tr);}
+ if(!state.cells.length){const tr=document.createElement('tr'),td=document.createElement('td');td.colSpan=9;td.className='empty-row';td.textContent='GPS区画の集計データがありません。';tr.append(td);$('cells-body').append(tr);}
 }
 function openImport(){$('import-error').hidden=true;$('import-dialog').showModal();}
 async function reset(mode){if(state.meta?.mode==='imported'&&!window.confirm('このPCに取り込んだデータを置き換えます。必要なら先にJSONを書き出してください。続けますか？'))return;try{await post('/api/local/reset',{mode});await reload();toast(mode==='empty'?'データを空にしました。3種類を順に取り込めます。':'データセットを切り替えました。');}catch(error){alert(error.message);}}
+$('heatmap-opacity').addEventListener('input',event=>updateHeatmapOpacity(event.target.value));
 $('search').addEventListener('input',renderList);$('reload').addEventListener('click',reload);
 $('map-selected').addEventListener('click',()=>void setMapMode('selected'));
 $('map-all').addEventListener('click',()=>void setMapMode('all'));

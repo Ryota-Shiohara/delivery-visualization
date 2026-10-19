@@ -39,6 +39,7 @@
       "centerLat": 35,
       "centerLon": 139,
       "sampleCount": 12,
+      "avgScore": 68.0,
       "avgVibration": 1.25,
       "maxVibration": 3.8,
       "impactCount": 2,

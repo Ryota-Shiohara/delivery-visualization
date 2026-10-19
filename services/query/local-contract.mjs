@@ -58,6 +58,9 @@ export function validateRecords(type, input) {
       if (typeof row[key] !== 'number' || !Number.isFinite(row[key])) fail(`${key}に有限の数値が必要です。`);
     }
     for (const key of spec.booleans ?? []) if (typeof row[key] !== 'boolean') fail(`${key}にはtrue/falseが必要です。`);
+    // 10/19のC共有形式。旧データの未取得値は許容し、0点と区別する。
+    if (type === 'cells' && row.avgScore !== undefined && row.avgScore !== null &&
+        (typeof row.avgScore !== 'number' || !Number.isFinite(row.avgScore) || row.avgScore < 0 || row.avgScore > 100)) fail('avgScoreには0〜100の有限の数値が必要です。');
     if (!Number.isFinite(Date.parse(row[spec.date])) || !/(Z|[+-]\d\d:\d\d)$/.test(row[spec.date])) fail(`${spec.date}はタイムゾーン付きISO日時にしてください。`);
     for (const key of spec.counts ?? []) if (!Number.isInteger(row[key]) || row[key] < 0) fail(`${key}には0以上の整数が必要です。`);
     for (const [key,min,max] of [['latitude',-90,90],['centerLat',-90,90],['longitude',-180,180],['centerLon',-180,180]]) {

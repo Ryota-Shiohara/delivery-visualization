@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev:d": "node scripts/local-dashboard-server.mjs",
-    "test:d": "node --test tests/d-query.test.mjs tests/d-aws-query.test.mjs tests/d-query-pages.test.mjs tests/d-dashboard-refresh.test.mjs",
+    "test:d": "node --test tests/d-query.test.mjs tests/d-aws-query.test.mjs tests/d-query-pages.test.mjs tests/d-dashboard-refresh.test.mjs tests/d-heatmap.test.mjs",
     "package:d": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/package-d-aws.ps1"
   },
   "engines": {
