@@ -6,23 +6,24 @@ import vm from 'node:vm';
 const source=await readFile(new URL('../apps/dashboard/app.js',import.meta.url),'utf8');
 async function dashboard(respond){
  const elements=new Map(),listeners={},timers=new Map(),calls=[],renders=[];
- let nextTimer=0;
+ let nextTimer=0,now=Date.UTC(2026,9,19);
+ class ClockDate extends Date{static now(){return now;}}
  const document={hidden:false,getElementById(id){
   if(!elements.has(id))elements.set(id,{disabled:false,hidden:false,value:'',style:{},classList:{toggle(){}},setAttribute(){},addEventListener(){}});
   return elements.get(id);
  },querySelectorAll(){return [];},addEventListener(name,callback){listeners[name]=callback;}};
  const window={DASHBOARD_CONFIG:{},addEventListener(name,callback){listeners[name]=callback;}};
- const context=vm.createContext({document,window,AbortSignal,URL,Intl,console,
+ const context=vm.createContext({document,window,AbortSignal,URL,Intl,console,Date:ClockDate,
   setTimeout(callback,ms){const id=++nextTimer;timers.set(id,{callback,ms});return id;},
   clearTimeout(id){timers.delete(id);},
   async fetch(path,options){calls.push({path,options});const data=await respond(path);return {ok:!data.error,status:data.status??200,json:async()=>data};}
  });
  const api=await vm.runInContext(`(async()=>{${source.replace('initializeMap();await reload();scheduleRefresh();','')}
  renderList=()=>{};renderCells=()=>{};renderDetail=preserve=>renders.push(preserve);
- return {state,refreshDashboard,scheduleRefresh,loadCollectionMore,loadDelivery,setMapMode,loadAllMap};})()`,vm.createContext({...context,renders}));
+ return {state,reload,refreshDashboard,scheduleRefresh,loadCollectionMore,loadDelivery,setMapMode,loadAllMap};})()`,vm.createContext({...context,renders}));
  Object.assign(api.state,{selectedId:'A',deliveries:[{deliveryId:'A'}],cells:[],meta:{label:'old'},
   detail:{deliveryId:'A',measurements:[{measurementId:'old'}],summary:{sampleCount:1},nextToken:null},page:2,eventsOnly:false});
- return {...api,elements,document,listeners,timers,calls,renders};
+ return {...api,elements,document,listeners,timers,calls,renders,advance(ms){now+=ms;}};
 }
 const response=path=>path.startsWith('/api/deliveries?')?{items:[{deliveryId:'A'}],meta:{label:'new'},nextToken:null}:
  path.startsWith('/api/cells?')?{items:[{cellId:'cell',sampleCount:2}],nextToken:null}:
@@ -112,11 +113,10 @@ test('全配送モードは一覧の全ページを読み、配送ごとの抽�
   assert.match(path,/limit=500&sampling=uniform/);
   return mapDetail(path.split('/')[3].split('?')[0]);
  });
- const detail=app.state.detail;
  await app.setMapMode('all');
  assert.equal(app.state.mapMode,'all');assert.equal(app.state.allMapDetails.length,4);
  assert.equal(app.state.deliveries.length,4);assert.equal(app.state.listCursor,null);
- assert.equal(maximum,2);assert.equal(app.state.detail,detail);assert.equal(app.state.allMapBusy,false);
+ assert.equal(maximum,2);assert.equal(app.state.detail.deliveryId,'A');assert.equal(app.state.allMapBusy,false);
  assert.match(app.elements.get('map-status').textContent,/4配送を取得・GPSあり4配送/);
  const calls=app.calls.length;await app.setMapMode('selected');assert.equal(app.calls.length,calls);
 });
@@ -161,4 +161,88 @@ test('配送なし・GPSなし・取得途中で削除された配送を区別�
   path.includes('/A?')?{deliveryId:'A',measurements:[]}:{error:'missing',status:404});
  await app.setMapMode('all');assert.equal(app.state.allMapDetails.length,1);
  assert.match(app.elements.get('map-status').textContent,/GPS座標がありません/);
+});
+
+const versionedSummary=(version=0)=>({updatedAt:new Date(Date.UTC(2026,9,19)+version*1000).toISOString(),sampleCount:100+version,impactCount:1,avgScore:90,maxVibration:4,maxTilt:10});
+function deliveryResponses(getItems){
+ return path=>{
+  const items=getItems();
+  if(path.startsWith('/api/deliveries?'))return {items,nextToken:null,meta:{label:'test'}};
+  if(path.startsWith('/api/cells?'))return {items:[],nextToken:null};
+  const id=decodeURIComponent(path.split('/')[3].split('?')[0]);
+  return {...mapDetail(id),summary:items.find(item=>item.deliveryId===id)?.summary};
+ };
+}
+const detailCalls=app=>app.calls.filter(({path})=>/^\/api\/deliveries\//.test(path));
+
+test('全配送の更新がなければ一覧と区画だけ取得し、更新された配送と新規配送だけ再取得する',async()=>{
+ let items=['A','B','C'].map(deliveryId=>({deliveryId,summary:versionedSummary()}));
+ const app=await dashboard(deliveryResponses(()=>items));
+ app.state.deliveries=items;
+ await app.loadDelivery('A');await app.setMapMode('all');
+ assert.equal(detailCalls(app).length,3); // 選択中のAも重複取得しない。
+ const before=app.state.allMapDetails.find(row=>row.deliveryId==='A');
+ app.calls.length=0;await app.refreshDashboard();
+ assert.equal(detailCalls(app).length,0);assert.equal(app.calls.filter(({path})=>path.startsWith('/api/deliveries?')).length,1);
+ items=[items[0],{deliveryId:'B',summary:versionedSummary(1)},{deliveryId:'D',summary:versionedSummary()}];
+ app.calls.length=0;await app.refreshDashboard();
+ assert.deepEqual(detailCalls(app).map(({path})=>path.split('/')[3].split('?')[0]).sort(),['B','D']);
+ assert.deepEqual(Array.from(app.state.allMapDetails,row=>row.deliveryId),['A','B','D']);
+ assert.equal(app.state.allMapDetails[0],before);assert.equal(app.state.detail,before);
+ items.push({deliveryId:'C',summary:versionedSummary()});app.calls.length=0;await app.refreshDashboard();
+ assert.equal(detailCalls(app).length,1);assert.match(detailCalls(app)[0].path,/\/C\?/);
+});
+
+test('選択中の配送も更新がなければ再利用し、同じ更新日時でも件数が変われば取得する',async()=>{
+ let summary=versionedSummary();const app=await dashboard(deliveryResponses(()=>[{deliveryId:'A',summary}]));
+ app.state.deliveries=[{deliveryId:'A',summary}];
+ await app.loadDelivery('A');app.calls.length=0;await app.refreshDashboard();assert.equal(detailCalls(app).length,0);
+ summary={...summary,sampleCount:101};await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+ const detail=app.state.detail;await app.setMapMode('all');assert.equal(detailCalls(app).length,1);assert.equal(app.state.detail,detail);
+});
+
+test('初回と更新直後は10秒後に索引を再確認し、その後は取得から60秒で再確認する',async()=>{
+ let summary=versionedSummary();const app=await dashboard(deliveryResponses(()=>[{deliveryId:'A',summary}]));
+ app.state.deliveries=[{deliveryId:'A',summary}];
+ await app.loadDelivery('A');app.calls.length=0;
+ app.advance(5000);await app.refreshDashboard();assert.equal(detailCalls(app).length,0);
+ app.advance(5000);await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+ app.calls.length=0;app.advance(59000);await app.refreshDashboard();assert.equal(detailCalls(app).length,0);
+ app.advance(1000);await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+ summary=versionedSummary(1);app.calls.length=0;await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+ app.calls.length=0;app.advance(10000);await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+ app.calls.length=0;await app.refreshDashboard();assert.equal(detailCalls(app).length,0);
+});
+
+test('全配送の一部の取得失敗を更新済みとして記録せず、次回に取り直す',async()=>{
+ let summary=versionedSummary(),fail=false;
+ const respond=deliveryResponses(()=>['A','B'].map(deliveryId=>({deliveryId,summary})));
+ const app=await dashboard(path=>{if(fail&&path.startsWith('/api/deliveries/B?'))throw new Error('offline');return respond(path);});
+ await app.setMapMode('all');const previous=app.state.allMapDetails;
+ summary=versionedSummary(1);fail=true;app.calls.length=0;await app.refreshDashboard();
+ assert.equal(app.state.allMapDetails,previous);assert.match(app.state.allMapError,/取得に失敗/);
+ fail=false;app.calls.length=0;await app.refreshDashboard();
+ assert.equal(detailCalls(app).length,2);assert.equal(app.state.allMapError,'');
+ app.calls.length=0;await app.refreshDashboard();assert.equal(detailCalls(app).length,0);
+});
+
+test('更新日時が欠けた配送ではキャッシュ判定をせず再取得する',async()=>{
+ const app=await dashboard(deliveryResponses(()=>[{deliveryId:'A',summary:{sampleCount:1}}]));
+ await app.loadDelivery('A');app.calls.length=0;await app.refreshDashboard();assert.equal(detailCalls(app).length,1);
+});
+
+test('手動更新ではキャッシュを破棄し、全配送でも選択中の配送を重複取得しない',async()=>{
+ const items=['A','B'].map(deliveryId=>({deliveryId,summary:versionedSummary()}));
+ const app=await dashboard(deliveryResponses(()=>items));await app.setMapMode('all');
+ app.calls.length=0;await app.reload();assert.equal(detailCalls(app).length,2);
+ assert.equal(app.state.allMapDetails.length,2);assert.equal(app.elements.get('reload').disabled,false);
+});
+
+test('取得中にモードを変更した結果をキャッシュへ保存しない',async()=>{
+ const items=[{deliveryId:'A',summary:versionedSummary()}];let release,entered;
+ const pending=new Promise(resolve=>release=resolve),started=new Promise(resolve=>entered=resolve);
+ const respond=deliveryResponses(()=>items);
+ const app=await dashboard(async path=>{if(path.startsWith('/api/deliveries/A?')){entered();await pending;}return respond(path);});
+ const loading=app.setMapMode('all');await started;await app.setMapMode('selected');release();await loading;
+ app.calls.length=0;await app.setMapMode('all');assert.equal(detailCalls(app).length,1);
 });

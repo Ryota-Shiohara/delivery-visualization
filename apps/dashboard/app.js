@@ -1,6 +1,18 @@
 const $=id=>document.getElementById(id);
 const state={deliveries:[],cells:[],detail:null,meta:null,selectedId:null,eventsOnly:true,page:0,view:'monitor',loadToken:0,reloadToken:0,listCursor:null,cellsCursor:null,detailBusy:false};
 Object.assign(state,{mapMode:'selected',allMapDetails:[],allMapBusy:false,allMapToken:0,allMapProgress:'',allMapError:''});
+const deliveryCache=new Map(),DETAIL_RECHECK_MS=60000,INDEX_RETRY_MS=10000;
+// 一覧の更新日時に加えて、同時刻に書き込まれた集計値の変化も検出する。
+function summaryVersion(summary){
+ if(!summary?.updatedAt||!Number.isFinite(Date.parse(summary.updatedAt)))return null;
+ return JSON.stringify([summary.updatedAt,summary.sampleCount,summary.impactCount,summary.avgScore,summary.maxVibration,summary.maxTilt]);
+}
+async function deliveryEntry(item){
+ const cached=deliveryCache.get(item.deliveryId),version=summaryVersion(item.summary),now=Date.now();
+ if(version&&cached?.version===version&&now-cached.fetchedAt<DETAIL_RECHECK_MS&&(!cached.retryAt||now<cached.retryAt))return cached;
+ const detail=await request(`/api/deliveries/${encodeURIComponent(item.deliveryId)}?limit=500&sampling=uniform`);
+ return {detail,version,fetchedAt:Date.now(),retryAt:!cached||cached.version!==version?Date.now()+INDEX_RETRY_MS:null};
+}
 const base=(window.DASHBOARD_CONFIG?.apiBaseUrl??'').replace(/\/$/,'');
 const cloudMode=window.DASHBOARD_CONFIG?.deployment==='aws'||/^https:\/\/[^/]+\.execute-api\.[^/]+\.amazonaws\.com/.test(base);
 let map,overlay,grid,tiles,selectedMarker,recordMarkers=new Map(),fitBounds;
@@ -24,6 +36,7 @@ function modeLabel(){
 async function reload(){
  try{
   const reloadToken=++state.reloadToken; ++state.loadToken;
+  deliveryCache.clear();
   ++state.allMapToken;state.allMapBusy=false;state.allMapDetails=[];state.allMapError='';
   $('reload').disabled=true;alert('');
   const [list,cells]=await Promise.all([request('/api/deliveries?limit=50'),request('/api/cells?limit=100')]);
@@ -53,13 +66,13 @@ function renderList(){
  if(!$('delivery-list').children.length){const p=document.createElement('p');p.textContent=state.deliveries.length?'一致する配送がありません。':'配送データがありません。';p.style.fontSize='11px';$('delivery-list').append(p);}
 }
 async function loadDelivery(id){
- const token=++state.loadToken;
+ const token=++state.loadToken,generation=state.reloadToken;
  if(!id){state.detail=null;renderDetail();return;}
  state.detail=null;state.detailBusy=true;renderDetail();
  try{
-  const detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500&sampling=uniform`);
-  if(token!==state.loadToken)return;
-  state.detail=detail;state.page=0;
+  const entry=await deliveryEntry(state.deliveries.find(item=>item.deliveryId===id)??{deliveryId:id});
+  if(token!==state.loadToken||generation!==state.reloadToken)return;
+  deliveryCache.set(id,entry);state.detail=entry.detail;state.page=0;
  }finally{if(token===state.loadToken){state.detailBusy=false;renderDetail();}}
 }
 function renderDetail(preserveMap=false){
@@ -154,13 +167,13 @@ async function setMapMode(mode){
  renderMapMode();renderMap();
  if(mode==='all')await loadAllMap();
 }
-async function loadAllMap(preserveView=false){
+async function loadAllMap(preserveView=false,providedList=null){
  if(state.mapMode!=='all'||state.allMapBusy)return;
  const token=++state.allMapToken,generation=state.reloadToken;
  const current=()=>token===state.allMapToken&&generation===state.reloadToken&&state.mapMode==='all';
  state.allMapBusy=true;state.allMapError='';state.allMapProgress='全配送の一覧を取得中…';renderMapMode();
  try{
-  const list=await refreshPages('/api/deliveries',50,'items',0,true);
+  const list=providedList??await refreshPages('/api/deliveries',50,'items',0,true);
   if(!current())return;
   const details=new Array(list.items.length);let next=0,done=0;
   state.allMapProgress=`全配送の軌跡を取得中… 0 / ${list.items.length}配送`;renderMapMode();
@@ -168,14 +181,23 @@ async function loadAllMap(preserveView=false){
   await Promise.all(Array.from({length:Math.min(2,list.items.length)},async()=>{
    while(current()&&next<list.items.length){
     const index=next++,id=list.items[index].deliveryId;
-    try{details[index]=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500&sampling=uniform`);}
+    try{details[index]=await deliveryEntry(list.items[index]);}
     catch(error){if(error.status!==404)throw error;}
     if(!current())return;
     state.allMapProgress=`全配送の軌跡を取得中… ${++done} / ${list.items.length}配送`;renderMapMode();
    }
   }));
   if(!current())return;
-  state.allMapDetails=details.filter(Boolean);state.deliveries=list.items;state.listCursor=list.nextToken??null;
+  const entries=details.filter(Boolean),ids=new Set(entries.map(entry=>entry.detail.deliveryId));
+  for(const id of deliveryCache.keys())if(!ids.has(id))deliveryCache.delete(id);
+  for(const entry of entries)deliveryCache.set(entry.detail.deliveryId,entry);
+  state.allMapDetails=entries.map(entry=>entry.detail);state.deliveries=list.items;state.listCursor=list.nextToken??null;
+  const selected=entries.find(entry=>entry.detail.deliveryId===state.selectedId)??entries[0];
+  if(!state.detailBusy){
+   const id=selected?.detail.deliveryId??null;
+   if(id!==state.selectedId)state.page=0;
+   state.selectedId=id;state.detail=selected?.detail??null;renderDetail(true);
+  }
   renderList();renderMap(preserveView);
  }catch(error){
   if(current()){++state.allMapToken;state.allMapError=`全配送の取得に失敗しました：${error.message}。${state.allMapDetails.length?'前回の軌跡を表示しています。':''}「更新」で再取得できます。`;}
@@ -291,27 +313,29 @@ async function refreshDashboard(){
  const snapshot={...state,detailCursor:state.detail?.nextToken};
  try{
   const [list,cells]=await Promise.all([
-   refreshPages('/api/deliveries',50,'items',state.deliveries.length),
+   refreshPages('/api/deliveries',50,'items',state.deliveries.length,snapshot.mapMode==='all'),
    refreshPages('/api/cells',100,'items',state.cells.length)
   ]);
-  let id=snapshot.selectedId??list.items[0]?.deliveryId??null,detail=null;
-  if(id){
-   try{detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500&sampling=uniform`);}
+  let id=snapshot.selectedId??list.items[0]?.deliveryId??null,detail=null,entry=null;
+  if(!list.nextToken&&!list.items.some(item=>item.deliveryId===id))id=list.items[0]?.deliveryId??null;
+  if(id&&snapshot.mapMode!=='all'){
+   try{entry=await deliveryEntry(list.items.find(item=>item.deliveryId===id)??{deliveryId:id});detail=entry.detail;}
    catch(error){
     if(error.status!==404)throw error;
     id=list.items.find(row=>row.deliveryId!==id)?.deliveryId??null;
-    if(id)detail=await request(`/api/deliveries/${encodeURIComponent(id)}?limit=500&sampling=uniform`);
+    if(id){entry=await deliveryEntry(list.items.find(item=>item.deliveryId===id));detail=entry.detail;}
    }
   }
   if(!refreshIsCurrent(snapshot))return;
+  if(entry)deliveryCache.set(id,entry);
   ++state.reloadToken;++state.loadToken;
   state.deliveries=list.items;state.listCursor=list.nextToken??null;state.meta=list.meta;
-  state.cells=cells.items;state.cellsCursor=cells.nextToken??null;state.detail=detail;state.selectedId=id;
+  state.cells=cells.items;state.cellsCursor=cells.nextToken??null;state.detail=snapshot.mapMode==='all'&&id===snapshot.selectedId?snapshot.detail:detail;state.selectedId=id;
   if(id!==snapshot.selectedId)state.page=0;
   set('connection',cloudMode?'AWS参照APIに接続':base?'参照APIに接続':'ローカルAPIに接続');
   set('mode-badge',modeLabel());set('dataset-label',state.meta.label);alert('');
   renderList();renderCells();renderDetail(id===snapshot.selectedId);
-  if(state.mapMode==='all')await loadAllMap(true);
+  if(state.mapMode==='all')await loadAllMap(true,list);
  }catch(error){
   if(refreshIsCurrent(snapshot)){set('connection','自動更新を再試行中');alert(`自動更新に失敗しました：${error.message}。表示済みの値は前回取得したデータです。接続回復後に自動で更新します。`);}
  }finally{refreshing=false;}
